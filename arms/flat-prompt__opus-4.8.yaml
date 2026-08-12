@@ -1,0 +1,16 @@
+# Baseline control: Opus 4.8 with NO pentest scaffolding.
+# Same adapter, model, task prompt, and budget as pt-agent__opus-4.8 — the only
+# difference is that the claude-code adapter runs in an empty working directory
+# (baselines/flat-prompt/) so no CLAUDE.md/AGENTS.md/skills/hooks load.
+# The coverage/efficiency gap vs pt-agent__opus-4.8 measures what the scaffolding
+# is worth. Keep every non-scaffolding field identical to that arm.
+name: flat-prompt__opus-4.8
+adapter: claude-code
+model: claude-opus-4-8
+adapter_config:
+  repo: /Users/mason/pt-bench/baselines/flat-prompt
+  skip_permissions: true       # match the pt-agent arm for a fair unattended run
+budget:
+  tool_calls: 150              # advisory (soft) in v1
+  usd: 15                      # advisory (soft) in v1
+  wall_time_s: 3600            # enforced by the adapter, with a runner backstop

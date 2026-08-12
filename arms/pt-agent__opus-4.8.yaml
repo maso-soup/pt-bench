@@ -11,6 +11,7 @@ adapter: claude-code
 model: claude-opus-4-8
 adapter_config:
   repo: /Users/mason/pt-agent
+  skip_permissions: true
 budget:
   tool_calls: 150              # advisory (soft) in v1
   usd: 15                      # advisory (soft) in v1
