@@ -1,0 +1,8 @@
+# Reference arm: the no-op example adapter. Runs with no model and no cost —
+# use it to validate the harness end-to-end (provision -> drive -> oracle -> grade).
+name: example__noop
+adapter: example-python      # directory under adapters/
+model: null
+adapter_config: {}
+budget:
+  wall_time_s: 120

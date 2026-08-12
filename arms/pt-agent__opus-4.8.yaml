@@ -1,0 +1,17 @@
+# The pt-agent skill/playbook stack on Opus 4.8.
+# adapter=claude-code points the generic Claude Code adapter at the pt-agent repo;
+# pt-agent itself is untouched and unaware of the benchmark.
+#
+# For unattended headless runs the adapter needs permission prompts suppressed.
+# That is an opt-in you enable yourself by adding to adapter_config:
+#     skip_permissions: true
+# See adapters/claude-code/README.md before enabling it.
+name: pt-agent__opus-4.8
+adapter: claude-code
+model: claude-opus-4-8
+adapter_config:
+  repo: /Users/mason/pt-agent
+budget:
+  tool_calls: 150              # advisory (soft) in v1
+  usd: 15                      # advisory (soft) in v1
+  wall_time_s: 3600            # enforced by the adapter, with a runner backstop

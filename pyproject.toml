@@ -1,0 +1,14 @@
+[project]
+name = "pt-bench"
+version = "0.1.0"
+description = "Modular benchmark for agentic penetration-testing agents"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["jsonschema>=4.0", "pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["bench*"]

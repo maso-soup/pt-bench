@@ -1,0 +1,15 @@
+# Juice Shop target for the benchmark. The runner sets JUICE_SHOP_IMAGE,
+# JUICE_SHOP_PORT, CTF_KEY and a unique COMPOSE_PROJECT_NAME per run so that
+# concurrent cells and repetitions never share state.
+#
+# NODE_ENV=ctf loads the app's bundled CTF configuration; CTF_KEY seeds the
+# deterministic per-challenge flags used as a cross-check on solved-state.
+services:
+  juice-shop:
+    image: ${JUICE_SHOP_IMAGE:-bkimminich/juice-shop:v17.1.1}
+    environment:
+      - NODE_ENV=ctf
+      - CTF_KEY=${CTF_KEY:-changeme-benchmark-key}
+    ports:
+      - "${JUICE_SHOP_PORT:-3000}:3000"
+    restart: "no"

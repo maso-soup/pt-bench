@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "usage",
+  "type": "object",
+  "properties": {
+    "tokens_in": { "type": ["integer", "null"] },
+    "tokens_out": { "type": ["integer", "null"] },
+    "cost_usd": { "type": ["number", "null"] },
+    "wall_time_s": { "type": ["number", "null"] }
+  }
+}
