@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -28,11 +30,36 @@ RESULTS_DIR = ROOT / "results"
 TIMEOUT_GRACE_S = 120  # runner backstop beyond the adapter's own wall limit
 
 
+# ${VAR} and ${VAR:-default} expansion (os.path.expandvars lacks :- defaults).
+_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_vars(s: str) -> str:
+    def repl(m: re.Match) -> str:
+        val = os.environ.get(m.group(1))
+        if val:  # set and non-empty wins
+            return val
+        return m.group(2) or ""  # else the :- default, or empty
+    return _VAR_RE.sub(repl, s)
+
+
+def resolve_repo(value: str, root: Path) -> str:
+    """Make an arm's `repo` portable: expand ${VARS} and ~, and resolve a
+    relative path against the pt-bench root. Absolute paths pass through."""
+    p = Path(os.path.expanduser(_expand_vars(str(value))))
+    return str(p if p.is_absolute() else (root / p))
+
+
 def load_arm(name: str) -> dict:
     path = ARMS_DIR / f"{name}.yaml"
     if not path.exists():
         sys.exit(f"no such arm: {path}")
-    return yaml.safe_load(path.read_text())
+    arm = yaml.safe_load(path.read_text())
+    cfg = arm.get("adapter_config") or {}
+    if cfg.get("repo"):  # normalize to an absolute host path once, at load time
+        cfg["repo"] = resolve_repo(cfg["repo"], ROOT)
+        arm["adapter_config"] = cfg
+    return arm
 
 
 def adapter_cmd(adapter_name: str) -> list[str]:

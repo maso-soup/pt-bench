@@ -47,17 +47,30 @@ run.py                 execute one cell for N repetitions
 
 ## Quick start
 
+Prerequisites: Docker running (for the target), and — only for the Claude Code
+arms — the `claude` CLI installed and authenticated. Nothing else is host-specific;
+arm `repo` paths are portable (see below), so a fresh clone needs no file edits.
+
 ```bash
-cd ~/pt-bench
-python3 -m pip install -e .        # installs PyYAML
+git clone <url> pt-bench && cd pt-bench
+python3 -m venv .venv && ./.venv/bin/pip install -e .   # installs PyYAML
 
-# 1) Validate the whole harness with the free no-op adapter:
-python3 run.py --arm example__noop --scenario juice-shop --repeats 1
+# 1) Validate the whole harness with the free no-op adapter (no claude/Docker cost):
+./.venv/bin/python run.py --arm example__noop --scenario juice-shop --repeats 1
 
-# 2) Benchmark pt-agent (needs the claude CLI; see adapters/claude-code/README.md
-#    and enable skip_permissions for unattended runs):
-python3 run.py --arm pt-agent__opus-4.8 --scenario juice-shop --repeats 5
+# 2) Benchmark pt-agent. Point PT_AGENT_REPO at your pt-agent checkout, or drop it
+#    at ~/pt-agent (the default). See adapters/claude-code/README.md.
+export PT_AGENT_REPO=/path/to/pt-agent
+./.venv/bin/python run.py --arm pt-agent__opus-4.8   --scenario juice-shop --repeats 5
+
+# 3) Baseline control (same model, no scaffolding) for the A/B:
+./.venv/bin/python run.py --arm flat-prompt__opus-4.8 --scenario juice-shop --repeats 5
 ```
+
+**Portable `repo` paths.** An arm's `adapter_config.repo` may be absolute, relative
+to the pt-bench root (e.g. `baselines/flat-prompt`), or use `~` and
+`${VAR:-default}` expansion (e.g. `${PT_AGENT_REPO:-~/pt-agent}`). The runner
+resolves it at load time, so the shipped arms work unchanged on any host.
 
 Each run provisions a fresh Juice Shop container, drives the agent, reads the
 solved-challenge state, grades, and tears the container down. Results land under

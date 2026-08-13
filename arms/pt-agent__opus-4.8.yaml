@@ -10,7 +10,9 @@ name: pt-agent__opus-4.8
 adapter: claude-code
 model: claude-opus-4-8
 adapter_config:
-  repo: /Users/mason/pt-agent
+  # Portable: set PT_AGENT_REPO to the pt-agent checkout on this host,
+  # or drop it at ~/pt-agent (the default). Absolute paths also work.
+  repo: ${PT_AGENT_REPO:-~/pt-agent}
   skip_permissions: true
 budget:
   tool_calls: 150              # advisory (soft) in v1

@@ -8,7 +8,7 @@ name: flat-prompt__opus-4.8
 adapter: claude-code
 model: claude-opus-4-8
 adapter_config:
-  repo: /Users/mason/pt-bench/baselines/flat-prompt
+  repo: baselines/flat-prompt  # relative to the pt-bench root; resolved by the runner
   skip_permissions: true       # match the pt-agent arm for a fair unattended run
 budget:
   tool_calls: 150              # advisory (soft) in v1
