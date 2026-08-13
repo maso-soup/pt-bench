@@ -29,6 +29,7 @@ COMPOSE_FILE = HERE / "docker-compose.yml"
 class JuiceShopScenario(Scenario):
     id = "juice-shop"
     category = "web"
+    supports_live_progress = True  # /api/Challenges is a cheap live GET, safe to poll
 
     def __init__(self, config: dict | None = None):
         cfg = _load_config()
@@ -37,6 +38,7 @@ class JuiceShopScenario(Scenario):
         self.image = cfg["image"]
         self.ctf_key = cfg.get("ctf_key") or secrets.token_hex(16)
         self.ready_timeout_s = int(cfg.get("ready_timeout_s", 180))
+        self.progress_interval_s = float(cfg.get("progress_interval_s", 5))
         self.project = f"jsbench-{uuid.uuid4().hex[:8]}"
 
     # -- lifecycle -----------------------------------------------------------

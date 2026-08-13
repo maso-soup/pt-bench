@@ -71,6 +71,10 @@ class Scenario(abc.ABC):
     id: str = "scenario"
     category: str = "generic"
 
+    # Opt in when the oracle is cheap and safe to poll repeatedly during a run;
+    # the runner then reports solves live (see bench/core/progress.py).
+    supports_live_progress: bool = False
+
     @abc.abstractmethod
     def provision(self) -> TargetHandle:
         """Bring the target to a known-good state and return a handle."""

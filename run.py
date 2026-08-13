@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from bench.core import adapter as adapter_mod  # noqa: E402
-from bench.core import grader, registry, results  # noqa: E402
+from bench.core import grader, progress, registry, results  # noqa: E402
 from bench.core.scenario import Budget  # noqa: E402
 
 ADAPTERS_DIR = ROOT / "adapters"
@@ -69,7 +69,8 @@ def adapter_cmd(adapter_name: str) -> list[str]:
     return [sys.executable, str(entry)]
 
 
-def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool) -> list[dict]:
+def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
+             progress_enabled: bool, progress_interval: float | None) -> list[dict]:
     budget = Budget.from_dict(arm.get("budget"))
     cmd = adapter_cmd(arm["adapter"])
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -92,9 +93,19 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool) -> list[d
                 workdir=workdir, adapter_config=arm.get("adapter_config", {}))
             backstop = (budget.wall_time_s + TIMEOUT_GRACE_S) if budget.wall_time_s else None
 
+            interval = (progress_interval if progress_interval is not None
+                        else getattr(scenario, "progress_interval_s", 5.0))
+            poller = progress.ProgressPoller(
+                scenario, handle, ground_truth=gt, workdir=workdir, interval=interval,
+                enabled=progress_enabled and scenario.supports_live_progress)
+
             print("  running adapter ...")
-            status = adapter_mod.run_adapter(
-                adapter_cmd=cmd, run_spec=spec, workdir=workdir, wall_time_s=backstop)
+            poller.start()
+            try:
+                status = adapter_mod.run_adapter(
+                    adapter_cmd=cmd, run_spec=spec, workdir=workdir, wall_time_s=backstop)
+            finally:
+                poller.stop()
             print(f"  adapter status: {status.get('status')}")
 
             oracle = scenario.oracle(handle)
@@ -126,10 +137,18 @@ def main() -> None:
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--keep-up", action="store_true",
                     help="do not tear down the target (debugging)")
+    ap.add_argument("--progress", action=argparse.BooleanOptionalAction, default=None,
+                    help="live solve progress in the terminal (default: on when a TTY)")
+    ap.add_argument("--progress-interval", type=float, default=None,
+                    help="seconds between solve-state polls (default: scenario's own)")
     args = ap.parse_args()
 
+    progress_enabled = args.progress if args.progress is not None else sys.stdout.isatty()
+
     arm = load_arm(args.arm)
-    rows = run_cell(arm, args.scenario, args.repeats, args.keep_up)
+    rows = run_cell(arm, args.scenario, args.repeats, args.keep_up,
+                    progress_enabled=progress_enabled,
+                    progress_interval=args.progress_interval)
 
     agg = results.aggregate(rows)
     print("\n=== aggregate ===")

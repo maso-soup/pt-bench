@@ -76,6 +76,14 @@ Each run provisions a fresh Juice Shop container, drives the agent, reads the
 solved-challenge state, grades, and tears the container down. Results land under
 `results/<arm>/<scenario>/`.
 
+**Live progress.** During a run the harness polls the scenario's oracle and prints
+each challenge as it's solved, plus an in-place running counter — so you can watch
+a long autonomous engagement instead of staring at `running adapter ...`. It's on
+by default when stdout is a TTY; control it with `--progress / --no-progress` and
+`--progress-interval <seconds>`. Every run also writes a solved-over-time curve to
+`progress.jsonl` in its workdir (for speed / coverage-at-budget analysis). Only
+scenarios that set `supports_live_progress = True` are polled.
+
 ## Adding things
 
 - **A new agent** → new dir under `adapters/` satisfying `PROTOCOL.md`, plus an

@@ -3,4 +3,5 @@
 image: "bkimminich/juice-shop:v17.1.1"
 port: 3000
 ready_timeout_s: 180
+progress_interval_s: 5    # how often to poll solved-state for live progress
 # ctf_key: optional fixed HMAC key for reproducible flags; random per-run if unset.
