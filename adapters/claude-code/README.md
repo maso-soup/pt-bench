@@ -32,6 +32,34 @@ are) — it removes the human-in-the-loop guard, so never point such an arm at a
 target you are not authorized to attack. It is intentionally left off in the
 shipped arm files so you opt in deliberately.
 
+## Run isolation: fresh `$HOME` per run
+
+Agents persist state on disk to survive context compression — pt-agent writes
+findings to `~/pt-agent-state/<target>/` and raw output to
+`~/pt-agent-output/<target>/`. Across repetitions against the same target those
+paths would collide, and a later run could read the earlier run's state and skip
+ahead — contaminating the "each run starts fresh" assumption the benchmark
+depends on.
+
+To prevent that, the adapter gives every run its own `HOME` (a `home/` dir inside
+the run's workdir) and symlinks only auth/config back in (`.claude`,
+`.claude.json`, `.gitconfig`). So `~/pt-agent-state` resolves *inside the
+sandbox*, empty at the start of every run. This is the agent-side analogue of
+`compose down -v` on the target, and it's agent-agnostic: it isolates whatever
+any agent writes under `$HOME` without the benchmark needing to know its paths.
+
+The **agent under test is not modified** — its resume-from-state behavior is a
+real feature (it's how progress survives context compression); the benchmark
+just controls the environment so that feature has nothing stale to resume from.
+
+Opt out (use the real `$HOME`) with:
+
+```yaml
+adapter_config:
+  repo: /path/to/agent
+  isolate_home: false
+```
+
 ## Budget
 
 `budget.wall_time_s` is enforced by the adapter (it kills the run when exceeded)
