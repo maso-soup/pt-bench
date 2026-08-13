@@ -42,10 +42,12 @@ class JuiceShopScenario(Scenario):
     # -- lifecycle -----------------------------------------------------------
     def provision(self) -> TargetHandle:
         env = _compose_env(self.image, self.port, self.ctf_key, self.project)
-        subprocess.run(
+        proc = subprocess.run(
             ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d"],
-            env=env, check=True, capture_output=True, text=True,
+            env=env, check=False, capture_output=True, text=True,
         )
+        if proc.returncode != 0:
+            raise RuntimeError(_compose_up_error(proc))
         url = f"http://localhost:{self.port}"
         self._wait_ready(url)
         return TargetHandle(
@@ -100,6 +102,24 @@ def _http_get_json(url: str, timeout: int = 10) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _compose_up_error(proc: subprocess.CompletedProcess) -> str:
+    """Turn a failed `docker compose up` into an actionable message instead of a
+    bare CalledProcessError that hides docker's own stderr."""
+    detail = (proc.stderr or proc.stdout or "").strip() or "(no output from docker)"
+    hint = (
+        "Common causes on a fresh host:\n"
+        "  - Docker not installed        -> install docker + the compose plugin\n"
+        "  - Daemon not running          -> sudo systemctl start docker\n"
+        "  - Socket permission denied     -> add your user to the 'docker' group "
+        "(sudo usermod -aG docker $USER) then log out/in, or run with sudo\n"
+        "  - Port already in use          -> set port: in "
+        "bench/scenarios/juice_shop/config.yaml\n"
+        "Reproduce directly:  docker compose -f "
+        "bench/scenarios/juice_shop/docker-compose.yml up -d"
+    )
+    return f"docker compose up failed (exit {proc.returncode}).\n\n{detail}\n\n{hint}"
 
 
 def _compose_env(image: str, port: int, ctf_key: str, project: str) -> dict:
