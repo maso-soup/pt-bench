@@ -51,15 +51,20 @@ clear before every run:
 adapter_config:
   repo: /path/to/agent
   reset_paths:
-    - ~/pt-agent-state/{target}
-    - ~/pt-agent-output/{target}
+    - ~/pt-agent-state
+    - ~/pt-agent-output
 ```
 
-`{target}` is replaced by a slug of the target URL (e.g. `localhost-3000`), so
-cleanup is **scoped to just this run's target** — other targets' state is left
-alone. To stay reversible, matching dirs are **moved to a timestamped trash dir**
-(`~/.pt-bench-trash/<stamp>/`) rather than hard-deleted; prune it yourself when
-you're sure. Omit `reset_paths` (or leave it empty) to disable.
+Each entry is a directory (or file) cleared before every run; `~` expands
+against the real home. To stay reversible, matching paths are **moved to a
+timestamped trash dir** (`~/.pt-bench-trash/<stamp>/`) rather than hard-deleted;
+prune it yourself when you're sure. Omit `reset_paths` (or leave it empty) to
+disable.
+
+> These are whole directories, so on a machine where you also run the agent
+> manually, point `reset_paths` at a dedicated benchmark location or run the
+> benchmark on its own host — a run will move *all* of `~/pt-agent-state` to
+> trash, not just the benchmark target's subdir.
 
 The **agent under test is not modified** — its resume-from-state behavior is a
 real feature (it's how progress survives context compression); the benchmark

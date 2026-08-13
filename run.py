@@ -93,12 +93,11 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
                 workdir=workdir, adapter_config=arm.get("adapter_config", {}))
             backstop = (budget.wall_time_s + TIMEOUT_GRACE_S) if budget.wall_time_s else None
 
-            # Clear this agent's prior on-disk state (scoped to this target) so
-            # repetitions never read each other's artifacts. Moved to trash, not
-            # deleted. See adapter_config.reset_paths in the arm file.
+            # Clear this agent's prior on-disk state so repetitions never read
+            # each other's artifacts. Moved to trash, not deleted. See
+            # adapter_config.reset_paths in the arm file.
             reset_paths = (arm.get("adapter_config") or {}).get("reset_paths") or []
-            moved = adapter_mod.reset_agent_state(
-                reset_paths=reset_paths, target_url=handle.target_url)
+            moved = adapter_mod.reset_agent_state(reset_paths=reset_paths)
             for src, dest in moved:
                 print(f"  reset: {src} -> trash ({dest.parent.name})")
 

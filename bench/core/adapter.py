@@ -12,7 +12,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
-import re
 import shutil
 import subprocess
 import time
@@ -34,30 +33,20 @@ def build_run_spec(*, handle: TargetHandle, model: str | None, budget: Budget,
     return spec
 
 
-def target_slug(target_url: str) -> str:
-    """Per-target directory name, matching how agents key their state dirs
-    (e.g. http://localhost:3000 -> localhost-3000). Strips the scheme and turns
-    ':' and '/' separators into '-'."""
-    s = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", target_url.strip()).rstrip("/")
-    return re.sub(r"[:/]+", "-", s) or "target"
-
-
-def reset_agent_state(*, reset_paths: list[str], target_url: str,
+def reset_agent_state(*, reset_paths: list[str],
                       trash_root: Path | None = None) -> list[tuple[Path, Path]]:
     """Clear an agent's on-disk state before a run so repetitions never read each
     other's artifacts — the agent-side analogue of `compose down -v`.
 
-    Each entry may contain `{target}`, replaced by `target_slug(target_url)`, so
-    cleanup is scoped to just this run's target dir rather than all of them. `~`
-    is expanded against the real HOME. To stay reversible, matching dirs are
-    *moved* to a timestamped trash dir (default ~/.pt-bench-trash/<stamp>/), not
-    hard-deleted. Returns the (source, destination) pairs actually moved."""
-    slug = target_slug(target_url)
+    Each entry is a directory (or file) to clear, with `~` expanded against the
+    real HOME. To stay reversible, matching paths are *moved* to a timestamped
+    trash dir (default ~/.pt-bench-trash/<stamp>/), not hard-deleted. Returns the
+    (source, destination) pairs actually moved."""
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     trash = (trash_root or Path.home() / ".pt-bench-trash") / stamp
     moved: list[tuple[Path, Path]] = []
     for entry in reset_paths or []:
-        src = Path(os.path.expanduser(entry.replace("{target}", slug)))
+        src = Path(os.path.expanduser(entry))
         if not src.exists():
             continue
         trash.mkdir(parents=True, exist_ok=True)

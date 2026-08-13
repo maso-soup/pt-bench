@@ -14,12 +14,11 @@ adapter_config:
   # or drop it at ~/pt-agent (the default). Absolute paths also work.
   repo: ${PT_AGENT_REPO:-~/pt-agent}
   skip_permissions: true
-  # Before each repetition, move this target's prior state/output to trash so a
-  # later run can't read it and skip ahead. {target} = slug of the target URL
-  # (e.g. localhost-3000); scoped to this target only, other targets untouched.
+  # Before each repetition, move pt-agent's prior state/output to trash so a
+  # later run can't read it and skip ahead. Whole dirs are moved (all targets).
   reset_paths:
-    - ~/pt-agent-state/{target}
-    - ~/pt-agent-output/{target}
+    - ~/pt-agent-state
+    - ~/pt-agent-output
 budget:
   tool_calls: 150              # advisory (soft) in v1
   usd: 15                      # advisory (soft) in v1
