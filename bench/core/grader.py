@@ -66,6 +66,32 @@ def efficiency(usage: dict[str, Any], tool_calls: list[dict[str, Any]]) -> dict[
     }
 
 
+def coverage_at_budget(curve: list[tuple[float, int, float]], total: int,
+                       wall_s: float | None,
+                       fractions: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)
+                       ) -> dict[str, Any]:
+    """Coverage-at-budget: solved fraction reached by each fraction of the wall
+    budget, from the progress curve (a step function of solved over time). Lets
+    you tell an agent that plateaus early from one still climbing when it stopped."""
+    curve = sorted(curve)
+    span = wall_s if wall_s else (curve[-1][0] if curve else 0.0)
+
+    def solved_by(t: float) -> int:
+        s = 0
+        for elapsed, solved, _ in curve:
+            if elapsed <= t:
+                s = solved
+            else:
+                break
+        return s
+
+    at = {}
+    for f in fractions:
+        n = solved_by(f * span) if span else 0
+        at[f"{f:.2f}"] = {"solved": n, "ratio": round(n / total, 4) if total else 0.0}
+    return {"wall_budget_s": wall_s, "at": at}
+
+
 def cost_per_solved(cov: dict[str, Any], eff: dict[str, Any]) -> dict[str, Any]:
     solved = cov["solved"] or 0
     out: dict[str, Any] = {}

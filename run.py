@@ -13,6 +13,7 @@ import datetime as dt
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -28,6 +29,8 @@ ADAPTERS_DIR = ROOT / "adapters"
 ARMS_DIR = ROOT / "arms"
 RESULTS_DIR = ROOT / "results"
 TIMEOUT_GRACE_S = 120  # runner backstop beyond the adapter's own wall limit
+MAX_CONTINUATION_ITERS = 10  # safety cap on max-coverage re-invocations
+MODES = ("autonomous", "max-coverage")
 
 
 # ${VAR} and ${VAR:-default} expansion (os.path.expandvars lacks :- defaults).
@@ -69,8 +72,58 @@ def adapter_cmd(adapter_name: str) -> list[str]:
     return [sys.executable, str(entry)]
 
 
+def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
+           mode: str) -> tuple[dict, list[Path]]:
+    """Run the adapter once (autonomous) or in a continuation loop (max-coverage)
+    until the agent solves everything, plateaus (an iteration adds no new solves),
+    errors, or the total wall budget runs out. State is preserved across
+    iterations so the agent resumes; the harness reads the oracle to decide when
+    to stop while the agent itself stays blind to the score."""
+    total_wall = budget.wall_time_s
+    started = time.time()
+    max_iters = MAX_CONTINUATION_ITERS if mode == "max-coverage" else 1
+    iter_dirs: list[Path] = []
+    status: dict = {"status": "error", "reason": "no iteration ran"}
+    prev_solved = -1
+
+    for it in range(max_iters):
+        remaining = None
+        if total_wall is not None:
+            remaining = int(total_wall - (time.time() - started))
+            if remaining <= 0:
+                status = {"status": "budget_exceeded", "reason": "wall_time_s exhausted"}
+                break
+
+        iter_dir = workdir / f"iter-{it:02d}"
+        iter_dirs.append(iter_dir)
+        it_budget = Budget(tool_calls=budget.tool_calls, usd=budget.usd,
+                           wall_time_s=remaining)
+        spec = adapter_mod.build_run_spec(
+            handle=handle, model=arm.get("model"), budget=it_budget, workdir=iter_dir,
+            adapter_config=arm.get("adapter_config", {}), continuation=(it > 0))
+        backstop = (remaining + TIMEOUT_GRACE_S) if remaining is not None else None
+
+        print(f"  {'running adapter' if it == 0 else f'continuing (iter {it})'} ...")
+        status = adapter_mod.run_adapter(
+            adapter_cmd=cmd, run_spec=spec, workdir=iter_dir, wall_time_s=backstop)
+        print(f"  adapter status: {status.get('status')}")
+
+        if mode != "max-coverage":
+            break
+        solved = len(scenario.oracle(handle).solved)
+        print(f"  progress after iter {it}: {solved}/{len(gt)} solved")
+        if solved >= len(gt) or status.get("status") == "error":
+            break
+        if it > 0 and solved <= prev_solved:  # plateau: no new solves this iteration
+            print(f"  plateau: iter {it} added no new solves — stopping")
+            break
+        prev_solved = solved
+
+    return status, iter_dirs
+
+
 def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
-             progress_enabled: bool, progress_interval: float | None) -> list[dict]:
+             mode: str, progress_enabled: bool, progress_interval: float | None) -> list[dict]:
     budget = Budget.from_dict(arm.get("budget"))
     cmd = adapter_cmd(arm["adapter"])
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -78,7 +131,7 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
 
     for i in range(repeats):
         workdir = RESULTS_DIR / arm["name"] / scenario_id / f"{stamp}-r{i}"
-        print(f"\n=== {arm['name']} x {scenario_id} : repeat {i} ===")
+        print(f"\n=== {arm['name']} x {scenario_id} [{mode}] : repeat {i} ===")
         scenario = registry.get_scenario(scenario_id, arm.get("scenario_config"))
 
         handle = None
@@ -88,17 +141,11 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
             gt = scenario.ground_truth(handle)
             print(f"  target up: {handle.target_url}  ({len(gt)} challenges)")
 
-            spec = adapter_mod.build_run_spec(
-                handle=handle, model=arm.get("model"), budget=budget,
-                workdir=workdir, adapter_config=arm.get("adapter_config", {}))
-            backstop = (budget.wall_time_s + TIMEOUT_GRACE_S) if budget.wall_time_s else None
-
-            # Clear this agent's prior on-disk state so repetitions never read
-            # each other's artifacts. Moved to trash, not deleted. See
-            # adapter_config.reset_paths in the arm file.
+            # Clear this agent's prior on-disk state once per repetition (before
+            # the first iteration) so repetitions never read each other's
+            # artifacts, while continuation iterations keep state to resume.
             reset_paths = (arm.get("adapter_config") or {}).get("reset_paths") or []
-            moved = adapter_mod.reset_agent_state(reset_paths=reset_paths)
-            for src, dest in moved:
+            for src, dest in adapter_mod.reset_agent_state(reset_paths=reset_paths):
                 print(f"  reset: {src} -> trash ({dest.parent.name})")
 
             interval = (progress_interval if progress_interval is not None
@@ -107,29 +154,32 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
                 scenario, handle, ground_truth=gt, workdir=workdir, interval=interval,
                 enabled=progress_enabled and scenario.supports_live_progress)
 
-            print("  running adapter ...")
             poller.start()
             try:
-                status = adapter_mod.run_adapter(
-                    adapter_cmd=cmd, run_spec=spec, workdir=workdir, wall_time_s=backstop)
+                status, iter_dirs = _drive(arm, scenario, handle, gt, cmd, budget,
+                                           workdir, mode)
             finally:
                 poller.stop()
-            print(f"  adapter status: {status.get('status')}")
 
             oracle = scenario.oracle(handle)
-            usage, tool_calls = adapter_mod.read_artifacts(workdir)
+            usage, tool_calls = adapter_mod.read_artifacts_multi(iter_dirs)
             cov = grader.coverage(gt, oracle)
             eff = grader.efficiency(usage, tool_calls)
             derived = grader.cost_per_solved(cov, eff)
+            cab = grader.coverage_at_budget(poller.curve, cov["total"], budget.wall_time_s)
+            summ = poller.summary()
+            curve = {"first_solve_s": summ["first_solve_s"],
+                     "last_solve_s": summ["last_solve_s"], **cab}
 
             row = results.make_row(
-                arm=arm["name"], scenario=scenario_id, repeat=i,
-                model=arm.get("model"), status=status.get("status", "error"),
-                coverage=cov, efficiency=eff, derived=derived, workdir=str(workdir))
+                arm=arm["name"], scenario=scenario_id, repeat=i, model=arm.get("model"),
+                mode=mode, iterations=len(iter_dirs), status=status.get("status", "error"),
+                coverage=cov, curve=curve, efficiency=eff, derived=derived,
+                workdir=str(workdir))
             results.write_row(row, workdir / "result.json")
             rows.append(row)
             print(f"  solved {cov['solved']}/{cov['total']}  "
-                  f"(weighted {cov['coverage_weighted']})  "
+                  f"(weighted {cov['coverage_weighted']})  iters={len(iter_dirs)}  "
                   f"tool_calls={eff['tool_calls']}  cost={eff['cost_usd']}")
         finally:
             if handle and not keep_up:
@@ -143,6 +193,10 @@ def main() -> None:
     ap.add_argument("--arm", required=True)
     ap.add_argument("--scenario", required=True)
     ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument("--mode", choices=MODES, default="autonomous",
+                    help="autonomous: one run, agent stops when it decides (honest "
+                         "baseline). max-coverage: re-invoke to resume until it "
+                         "plateaus or the wall budget runs out (capability ceiling).")
     ap.add_argument("--keep-up", action="store_true",
                     help="do not tear down the target (debugging)")
     ap.add_argument("--progress", action=argparse.BooleanOptionalAction, default=None,
@@ -155,7 +209,7 @@ def main() -> None:
 
     arm = load_arm(args.arm)
     rows = run_cell(arm, args.scenario, args.repeats, args.keep_up,
-                    progress_enabled=progress_enabled,
+                    mode=args.mode, progress_enabled=progress_enabled,
                     progress_interval=args.progress_interval)
 
     agg = results.aggregate(rows)

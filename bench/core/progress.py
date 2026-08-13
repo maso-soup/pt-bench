@@ -108,6 +108,7 @@ class ProgressPoller:
         self._first_solve_s: float | None = None
         self._last_solve_s: float | None = None
         self._samples = 0
+        self._curve: list[tuple[float, int, float]] = []  # (elapsed_s, solved, weighted)
         self._fh: TextIO | None = None
 
     def start(self) -> None:
@@ -129,6 +130,16 @@ class ProgressPoller:
         if self._fh:
             self._fh.close()
             self._fh = None
+
+    @property
+    def curve(self) -> list[tuple[float, int, float]]:
+        """Change-points as (elapsed_s, solved, weighted); a step function that
+        lets you read solved-count at any earlier time (coverage-at-budget)."""
+        return list(self._curve)
+
+    @property
+    def solved(self) -> int:
+        return self._reporter.solved
 
     def summary(self) -> dict:
         return {
@@ -160,6 +171,7 @@ class ProgressPoller:
             if self._first_solve_s is None:
                 self._first_solve_s = elapsed
             self._last_solve_s = elapsed
+            self._curve.append((elapsed, self._reporter.solved, round(self._reporter.weighted, 4)))
             self._write_sample(elapsed, new_keys)
 
     def _write_sample(self, elapsed: float, new_keys: list[str]) -> None:

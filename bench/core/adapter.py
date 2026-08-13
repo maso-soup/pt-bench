@@ -22,13 +22,15 @@ from .scenario import Budget, TargetHandle
 
 
 def build_run_spec(*, handle: TargetHandle, model: str | None, budget: Budget,
-                   workdir: Path, adapter_config: dict[str, Any]) -> dict[str, Any]:
+                   workdir: Path, adapter_config: dict[str, Any],
+                   continuation: bool = False) -> dict[str, Any]:
     spec = handle.public()
     spec.update({
         "model": model,
         "budget": budget.to_dict(),
         "workdir": str(workdir),
         "extra": adapter_config or {},
+        "continuation": continuation,  # max-coverage mode: resume, don't restart
     })
     return spec
 
@@ -91,6 +93,26 @@ def read_artifacts(workdir: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]
             usage["wall_time_s"] = st["wall_time_s"]
     tool_calls = _read_jsonl(workdir / "tool_calls.jsonl")
     return usage, tool_calls
+
+
+def read_artifacts_multi(workdirs: list[Path]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Sum usage and concatenate tool calls across continuation iterations, so a
+    max-coverage run's efficiency reflects the whole effort. A summed field is
+    None only if every iteration left it None."""
+    combined_calls: list[dict[str, Any]] = []
+    totals: dict[str, float] = {}
+    seen: set[str] = set()
+    for wd in workdirs:
+        usage, calls = read_artifacts(wd)
+        combined_calls += calls
+        for k in ("tokens_in", "tokens_out", "cost_usd", "wall_time_s"):
+            v = usage.get(k)
+            if v is not None:
+                totals[k] = totals.get(k, 0) + v
+                seen.add(k)
+    usage = {k: (totals[k] if k in seen else None)
+             for k in ("tokens_in", "tokens_out", "cost_usd", "wall_time_s")}
+    return usage, combined_calls
 
 
 def _read_json(path: Path, default: Any) -> Any:

@@ -78,11 +78,36 @@ solved-challenge state, grades, and tears the container down. Results land under
 
 **Live progress.** During a run the harness polls the scenario's oracle and prints
 each challenge as it's solved, plus an in-place running counter — so you can watch
-a long autonomous engagement instead of staring at `running adapter ...`. It's on
-by default when stdout is a TTY; control it with `--progress / --no-progress` and
+a long engagement instead of staring at `running adapter ...`. It's on by default
+when stdout is a TTY; control it with `--progress / --no-progress` and
 `--progress-interval <seconds>`. Every run also writes a solved-over-time curve to
-`progress.jsonl` in its workdir (for speed / coverage-at-budget analysis). Only
-scenarios that set `supports_live_progress = True` are polled.
+`progress.jsonl` in its workdir. Only scenarios that set
+`supports_live_progress = True` are polled.
+
+**Modes (`--mode`).** Agents tend to wrap up an open-ended pentest and stop long
+before they've exhausted a target, so a single number conflates *capability* with
+*stopping disposition*. Run both modes and compare:
+
+- `autonomous` (default) — one invocation; the agent stops when it decides. The
+  honest real-world baseline.
+- `max-coverage` — re-invoke the agent (state preserved, so it resumes) until it
+  solves everything, **plateaus** (an iteration adds no new solves), errors, or the
+  total `wall_time_s` budget runs out (safety cap: 10 iterations). The agent stays
+  blind to the score; the harness reads the oracle to decide when to stop. Measures
+  the capability *ceiling*.
+
+The **gap** between the two is how much the agent leaves on the table by quitting
+early. Each result row also carries `coverage_at_budget` (solved fraction reached
+by 25/50/75/100% of the wall budget) and `first_solve_s`, so you can tell an agent
+that plateaued from one still climbing when it stopped. Per-iteration artifacts
+land in `workdir/iter-NN/`; efficiency (tokens/cost/tool-calls) is summed across
+iterations.
+
+```bash
+# baseline vs ceiling for the same arm
+./.venv/bin/python run.py --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --repeats 5
+./.venv/bin/python run.py --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
+```
 
 ## Adding things
 

@@ -31,6 +31,22 @@ def build_prompt(spec: dict) -> str:
         ("seconds", b.get("wall_time_s"))) if v]
     if caps:
         budget_line = "\nApproximate budget for this engagement: " + ", ".join(caps) + "."
+
+    if spec.get("continuation"):
+        # max-coverage mode: the agent already worked this target and its progress
+        # is in its state files. Push it to resume rather than restart or wrap up.
+        return (
+            f"{spec['scope']}\n\n"
+            f"Target: {spec['target_url']}\n\n"
+            "You have already been performing an authorized penetration test of this "
+            "host and your progress is saved in your state files — re-read them first, "
+            "then resume where you left off. Keep discovering and exploiting "
+            "vulnerabilities you have not yet confirmed. Do NOT repeat work already "
+            "done, and do NOT stop or write a final wrap-up report yet — there is more "
+            "to find. Work autonomously without pausing for confirmation, and stay on "
+            "the target host only." + budget_line
+        )
+
     return (
         f"{spec['scope']}\n\n"
         f"Target: {spec['target_url']}\n\n"
