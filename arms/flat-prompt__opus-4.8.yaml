@@ -10,6 +10,11 @@ model: claude-opus-4-8
 adapter_config:
   repo: baselines/flat-prompt  # relative to the pt-bench root; resolved by the runner
   skip_permissions: true       # match the pt-agent arm for a fair unattended run
+  # Clear Claude Code's per-project memory between repetitions so it can't read
+  # back a prior run's notes. (No pt-agent-state here — this arm has no
+  # scaffolding.) See the pt-agent arm for the host-scope caveat.
+  reset_paths:
+    - ~/.claude/projects
 budget:
   tool_calls: 150              # advisory (soft) in v1
   usd: 15                      # advisory (soft) in v1

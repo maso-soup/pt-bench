@@ -14,11 +14,16 @@ adapter_config:
   # or drop it at ~/pt-agent (the default). Absolute paths also work.
   repo: ${PT_AGENT_REPO:-~/pt-agent}
   skip_permissions: true
-  # Before each repetition, move pt-agent's prior state/output to trash so a
-  # later run can't read it and skip ahead. Whole dirs are moved (all targets).
+  # Before each repetition, move prior state to trash so a later run can't read
+  # it and skip ahead. Whole dirs are moved. ~/.claude/projects holds Claude
+  # Code's per-project memory (keyed by cwd), which the agent reads back on a
+  # fresh run — clearing it stops memory leaking between repetitions. NOTE:
+  # ~/.claude/projects covers ALL Claude Code projects/sessions on this host, so
+  # run the benchmark on a dedicated host and not alongside other claude sessions.
   reset_paths:
     - ~/pt-agent-state
     - ~/pt-agent-output
+    - ~/.claude/projects
 budget:
   tool_calls: 150              # advisory (soft) in v1
   usd: 15                      # advisory (soft) in v1

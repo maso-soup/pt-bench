@@ -53,6 +53,7 @@ adapter_config:
   reset_paths:
     - ~/pt-agent-state
     - ~/pt-agent-output
+    - ~/.claude/projects    # Claude Code's per-project memory (see below)
 ```
 
 Each entry is a directory (or file) cleared before every run; `~` expands
@@ -60,6 +61,14 @@ against the real home. To stay reversible, matching paths are **moved to a
 timestamped trash dir** (`~/.pt-bench-trash/<stamp>/`) rather than hard-deleted;
 prune it yourself when you're sure. Omit `reset_paths` (or leave it empty) to
 disable.
+
+**Claude Code memory.** Beyond the agent's own state dirs, Claude Code persists
+per-project memory under `~/.claude/projects/<cwd-hash>/memory/`, keyed by the
+working directory — so repetitions of the same arm share it, and the agent reads
+it back on a fresh run, leaking findings between runs. Include `~/.claude/projects`
+in `reset_paths` to clear it. Because that path spans **all** Claude Code
+projects/sessions on the host (not just this arm's), run the benchmark on a
+dedicated host and not alongside other `claude` sessions.
 
 > These are whole directories, so on a machine where you also run the agent
 > manually, point `reset_paths` at a dedicated benchmark location or run the
