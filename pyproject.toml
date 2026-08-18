@@ -3,6 +3,9 @@ name = "pt-bench"
 version = "0.1.0"
 description = "Modular benchmark for agentic penetration-testing agents"
 requires-python = ">=3.11"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+]
 dependencies = [
     "PyYAML>=6.0",
 ]

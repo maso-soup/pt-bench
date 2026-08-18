@@ -124,3 +124,11 @@ iterations.
 - `tool_calls` / `usd` budgets are advisory in v1; only `wall_time_s` is enforced.
 - Concurrent runs on one host need distinct `port`s (compose project names are
   already unique per run).
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+This is tooling for **authorized** security testing only. Run it against targets
+you own or have explicit written permission to test; the license disclaims all
+warranty and liability.

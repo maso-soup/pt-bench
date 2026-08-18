@@ -18,4 +18,4 @@ adapter_config:
 budget:
   tool_calls: 150              # advisory (soft) in v1
   usd: 15                      # advisory (soft) in v1
-  wall_time_s: 3600            # enforced by the adapter, with a runner backstop
+  wall_time_s: 1800            # enforced by the adapter, with a runner backstop
