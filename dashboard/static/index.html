@@ -101,7 +101,7 @@ async function jget(u){ const r = await fetch(u); if(!r.ok) throw new Error(u); 
 let RUNS = [];
 function optionLabel(r){
   const d = (r.started_at||"").replace("T"," ").slice(0,16);
-  return `${r.arm} · ${r.scenario} · ${r.mode} · ${d}  (${pct(r.coverage_mean)})`;
+  return `${r.arm} · ${r.scenario} · ${r.mode} · ×${r.repeats} · ${d}  (${pct(r.coverage_mean)})`;
 }
 
 async function boot(){

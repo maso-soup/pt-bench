@@ -8,11 +8,17 @@ classifiers = [
 ]
 dependencies = [
     "PyYAML>=6.0",
+    "Flask>=3.0",
 ]
 
 [project.optional-dependencies]
 dev = ["jsonschema>=4.0", "pytest>=8.0"]
-dashboard = ["Flask>=3.0"]
+
+[project.scripts]
+pt-bench-dashboard = "dashboard.app:main"
 
 [tool.setuptools.packages.find]
-include = ["bench*"]
+include = ["bench*", "dashboard*"]
+
+[tool.setuptools.package-data]
+dashboard = ["static/*"]

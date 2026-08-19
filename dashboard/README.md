@@ -7,10 +7,13 @@ database) and imports only the shared result schema from `bench.core.results`.
 ## Run it
 
 ```bash
-pip install -e '.[dashboard]'          # adds Flask
-python dashboard/app.py                 # http://127.0.0.1:8008
+pip install -e .            # Flask ships with the benchmark; no extra step
+pt-bench-dashboard          # http://127.0.0.1:8008
 # options: --results-dir <path>  --port <n>  --host <addr>
 ```
+
+`pt-bench-dashboard` is a console command installed with the package (equivalent
+to `python dashboard/app.py`).
 
 It resolves the results location the same way the runner does
 (`--results-dir` > `$PTBENCH_RESULTS_DIR` > `~/.local/share/pt-bench/results`),

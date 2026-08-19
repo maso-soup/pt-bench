@@ -132,6 +132,20 @@ iterations.
 - Concurrent runs on one host need distinct `port`s (compose project names are
   already unique per run).
 
+## Dashboard
+
+A local web UI to compare any two runs side by side (coverage, coverage-at-budget
+curves, efficiency, by-category / by-difficulty, and git-SHA provenance). It ships
+with the benchmark — no extra install — and reads the same results dir.
+
+```bash
+pt-bench-dashboard            # http://127.0.0.1:8008  (--results-dir / --port to override)
+```
+
+A `--repeats N` run appears as one selectable run (the mean of its N repetitions,
+with a 95% CI and an `N/N runs` label); the picker shows `×N` so a repeats=1 run is
+distinct from a repeats=5 one. See [dashboard/README.md](dashboard/README.md).
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
