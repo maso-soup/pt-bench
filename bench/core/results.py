@@ -9,10 +9,53 @@ from __future__ import annotations
 import json
 import math
 import statistics
+import subprocess
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 2
+
+
+def git_sha(path: str | Path | None) -> dict[str, Any] | None:
+    """Commit SHA + dirty flag for a git repo, or None if not a repo. Records
+    provenance so a comparison can say which version produced a result."""
+    if not path:
+        return None
+    try:
+        p = str(path)
+        sha = subprocess.run(["git", "-C", p, "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=5)
+        if sha.returncode != 0:
+            return None
+        dirty = subprocess.run(["git", "-C", p, "status", "--porcelain"],
+                               capture_output=True, text=True, timeout=5)
+        return {"sha": sha.stdout.strip(), "dirty": bool(dirty.stdout.strip())}
+    except Exception:  # noqa: BLE001 - provenance is best-effort, never fatal
+        return None
+
+
+def make_manifest(*, arm: dict[str, Any], scenario: str, mode: str, repeats: int,
+                  started_at: str, budget: dict[str, Any] | None,
+                  pt_bench_dir: str | Path, agent_repo: str | None) -> dict[str, Any]:
+    """Run-batch provenance: what was run, how, and from which code versions."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "arm": arm.get("name"),
+        "adapter": arm.get("adapter"),
+        "model": arm.get("model"),
+        "scenario": scenario,
+        "mode": mode,
+        "repeats": repeats,
+        "started_at": started_at,
+        "budget": budget,
+        "adapter_config": dict(arm.get("adapter_config") or {}),
+        "git": {"pt_bench": git_sha(pt_bench_dir), "agent_repo": git_sha(agent_repo)},
+    }
+
+
+def write_json(obj: dict[str, Any], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, indent=2, sort_keys=True))
 
 
 def make_row(*, arm: str, scenario: str, repeat: int, model: str | None,

@@ -41,8 +41,8 @@ adapters/              PROTOCOL.md, JSON schemas, one dir per agent wrapper
   example-python/      minimal no-op reference adapter (validates the harness)
   claude-code/         drives any Claude Code repo (e.g. pt-agent) headless
 arms/                  (adapter x model) configs — what you actually run
-results/               one result.json per (arm x scenario x repetition)
 run.py                 execute one cell for N repetitions
+# results are written outside the repo (XDG data dir) — see Results storage below
 ```
 
 ## Quick start
@@ -73,8 +73,15 @@ to the pt-bench root (e.g. `baselines/flat-prompt`), or use `~` and
 resolves it at load time, so the shipped arms work unchanged on any host.
 
 Each run provisions a fresh Juice Shop container, drives the agent, reads the
-solved-challenge state, grades, and tears the container down. Results land under
-`results/<arm>/<scenario>/`.
+solved-challenge state, grades, and tears the container down.
+
+**Results storage.** Results are kept **outside the repo** so they survive
+re-clones: `--results-dir` > `$PTBENCH_RESULTS_DIR` > the XDG default
+`~/.local/share/pt-bench/results`. Each cell writes a batch dir
+`<results>/<arm>/<scenario>/<stamp>/` containing `manifest.json` (provenance:
+mode, model, budget, and the git SHA of pt-bench and the agent repo),
+`summary.json` (the aggregate), and one `r<i>/` per repetition with its
+`result.json`, `progress.jsonl`, and per-iteration `iter-NN/` artifacts.
 
 **Live progress.** During a run the harness polls the scenario's oracle and prints
 each challenge as it's solved, plus an in-place running counter — so you can watch

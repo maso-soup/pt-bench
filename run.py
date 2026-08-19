@@ -27,10 +27,21 @@ from bench.core.scenario import Budget  # noqa: E402
 
 ADAPTERS_DIR = ROOT / "adapters"
 ARMS_DIR = ROOT / "arms"
-RESULTS_DIR = ROOT / "results"
 TIMEOUT_GRACE_S = 120  # runner backstop beyond the adapter's own wall limit
 MAX_CONTINUATION_ITERS = 10  # safety cap on max-coverage re-invocations
 MODES = ("autonomous", "max-coverage")
+
+
+def resolve_results_dir(cli_arg: str | None) -> Path:
+    """Where results live, kept OUT of the repo so they survive re-clones:
+    --results-dir > $PTBENCH_RESULTS_DIR > XDG data dir (~/.local/share/pt-bench)."""
+    if cli_arg:
+        return Path(os.path.expanduser(cli_arg))
+    if os.environ.get("PTBENCH_RESULTS_DIR"):
+        return Path(os.path.expanduser(os.environ["PTBENCH_RESULTS_DIR"]))
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"),
+                                                           ".local", "share")
+    return Path(base) / "pt-bench" / "results"
 
 
 # ${VAR} and ${VAR:-default} expansion (os.path.expandvars lacks :- defaults).
@@ -123,14 +134,23 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
 
 
 def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
-             mode: str, progress_enabled: bool, progress_interval: float | None) -> list[dict]:
+             mode: str, results_dir: Path, progress_enabled: bool,
+             progress_interval: float | None) -> tuple[list[dict], Path]:
     budget = Budget.from_dict(arm.get("budget"))
     cmd = adapter_cmd(arm["adapter"])
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    started_at = dt.datetime.now()
+    stamp = started_at.strftime("%Y%m%d-%H%M%S")
+    # One batch dir per cell groups its repetitions and holds provenance.
+    batch_dir = results_dir / arm["name"] / scenario_id / stamp
+    results.write_json(results.make_manifest(
+        arm=arm, scenario=scenario_id, mode=mode, repeats=repeats,
+        started_at=started_at.isoformat(timespec="seconds"), budget=budget.to_dict(),
+        pt_bench_dir=ROOT, agent_repo=(arm.get("adapter_config") or {}).get("repo")),
+        batch_dir / "manifest.json")
     rows: list[dict] = []
 
     for i in range(repeats):
-        workdir = RESULTS_DIR / arm["name"] / scenario_id / f"{stamp}-r{i}"
+        workdir = batch_dir / f"r{i}"
         print(f"\n=== {arm['name']} x {scenario_id} [{mode}] : repeat {i} ===")
         scenario = registry.get_scenario(scenario_id, arm.get("scenario_config"))
 
@@ -185,7 +205,9 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
             if handle and not keep_up:
                 print("  tearing down ...")
                 scenario.teardown(handle)
-    return rows
+
+    results.write_json(results.aggregate(rows), batch_dir / "summary.json")
+    return rows, batch_dir
 
 
 def main() -> None:
@@ -203,19 +225,24 @@ def main() -> None:
                     help="live solve progress in the terminal (default: on when a TTY)")
     ap.add_argument("--progress-interval", type=float, default=None,
                     help="seconds between solve-state polls (default: scenario's own)")
+    ap.add_argument("--results-dir", default=None,
+                    help="where to store results (default: $PTBENCH_RESULTS_DIR or "
+                         "~/.local/share/pt-bench/results; kept out of the repo)")
     args = ap.parse_args()
 
     progress_enabled = args.progress if args.progress is not None else sys.stdout.isatty()
+    results_dir = resolve_results_dir(args.results_dir)
 
     arm = load_arm(args.arm)
-    rows = run_cell(arm, args.scenario, args.repeats, args.keep_up,
-                    mode=args.mode, progress_enabled=progress_enabled,
-                    progress_interval=args.progress_interval)
+    rows, batch_dir = run_cell(arm, args.scenario, args.repeats, args.keep_up,
+                               mode=args.mode, results_dir=results_dir,
+                               progress_enabled=progress_enabled,
+                               progress_interval=args.progress_interval)
 
-    agg = results.aggregate(rows)
     print("\n=== aggregate ===")
-    for k, v in agg.items():
+    for k, v in results.aggregate(rows).items():
         print(f"  {k}: {v}")
+    print(f"\nresults: {batch_dir}")
 
 
 if __name__ == "__main__":
