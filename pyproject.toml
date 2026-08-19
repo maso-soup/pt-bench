@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["jsonschema>=4.0", "pytest>=8.0"]
+dashboard = ["Flask>=3.0"]
 
 [tool.setuptools.packages.find]
 include = ["bench*"]

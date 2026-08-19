@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pt-bench · compare</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1a1d21; --muted:#697079;
+    --line:#e6e8ec; --accent:#4f46e5; --a:#4f46e5; --b:#e07b16;
+    --good:#16a34a; --chip:#eef0f4; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#0e1013; --panel:#16191e; --ink:#e8eaed; --muted:#9aa2ad;
+      --line:#262b32; --accent:#7c78f0; --a:#7c78f0; --b:#f0a24a; --good:#4ade80;
+      --chip:#20242b; --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 60px}
+  header h1{margin:0;font-size:20px;font-weight:650;letter-spacing:-.01em}
+  header p{margin:4px 0 0;color:var(--muted)}
+  .pickers{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:22px 0}
+  .pick label{display:block;font-size:12px;font-weight:600;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+  .pick.a label{color:var(--a)} .pick.b label{color:var(--b)}
+  select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+    background:var(--panel);color:var(--ink);font-size:14px;appearance:none;cursor:pointer}
+  select:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);padding:18px 18px 16px}
+  .overlay{margin-bottom:18px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:760px){.pickers,.cols{grid-template-columns:1fr}}
+  h2{margin:0 0 2px;font-size:16px;font-weight:650}
+  h3{margin:0 0 10px;font-size:11px;font-weight:700;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.05em}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
+  .chip{background:var(--chip);border-radius:999px;padding:3px 9px;font-size:12px;color:var(--muted)}
+  .chip.mode{font-weight:600;color:var(--ink)}
+  .prov{font-size:12px;color:var(--muted);margin:-6px 0 14px;font-variant-numeric:tabular-nums}
+  .prov code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .dirty{color:var(--b)}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+  .metric{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .metric .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .metric .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px}
+  .metric .v small{font-size:12px;font-weight:500;color:var(--muted)}
+  .bars{display:flex;flex-direction:column;gap:7px}
+  .bar{display:grid;grid-template-columns:120px 1fr auto;gap:10px;align-items:center;font-size:12px}
+  .bar .lbl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar .track{height:8px;border-radius:6px;background:var(--chip);overflow:hidden}
+  .bar .fill{height:100%;border-radius:6px}
+  .bar .num{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .section{margin-top:16px}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .empty{color:var(--muted);text-align:center;padding:40px 0}
+  svg{display:block;width:100%;height:auto}
+  .axis{stroke:var(--line)} .grid{stroke:var(--line);stroke-dasharray:2 4}
+  .tick{fill:var(--muted);font-size:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>pt-bench · compare</h1>
+    <p>Pick two runs to compare coverage, efficiency, and where the solves came from.</p>
+  </header>
+
+  <div class="pickers">
+    <div class="pick a"><label>Run A</label><select id="selA"></select></div>
+    <div class="pick b"><label>Run B</label><select id="selB"></select></div>
+  </div>
+
+  <div class="card overlay" id="overlay" hidden>
+    <h3>Coverage at budget</h3>
+    <div id="overlayChart"></div>
+    <div class="legend">
+      <span><i style="background:var(--a)"></i><span id="legA">A</span></span>
+      <span><i style="background:var(--b)"></i><span id="legB">B</span></span>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div id="colA"></div>
+    <div id="colB"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const pct = x => x==null ? "–" : (x*100).toFixed(1)+"%";
+const num = (x,d=0) => x==null ? "–" : Number(x).toFixed(d);
+const short = s => s ? s.slice(0,7) : "–";
+
+async function jget(u){ const r = await fetch(u); if(!r.ok) throw new Error(u); return r.json(); }
+
+let RUNS = [];
+function optionLabel(r){
+  const d = (r.started_at||"").replace("T"," ").slice(0,16);
+  return `${r.arm} · ${r.scenario} · ${r.mode} · ${d}  (${pct(r.coverage_mean)})`;
+}
+
+async function boot(){
+  RUNS = await jget("/api/runs");
+  for(const sel of [$("#selA"),$("#selB")]){
+    sel.innerHTML = `<option value="">— select a run —</option>` +
+      RUNS.map(r=>`<option value="${r.id}">${optionLabel(r)}</option>`).join("");
+  }
+  if(RUNS[0]) $("#selA").value = RUNS[0].id;
+  if(RUNS[1]) $("#selB").value = RUNS[1].id;
+  $("#selA").onchange = refresh; $("#selB").onchange = refresh;
+  refresh();
+}
+
+let DETAIL = {A:null,B:null};
+async function refresh(){
+  const ida = $("#selA").value, idb = $("#selB").value;
+  DETAIL.A = ida ? await jget("/api/runs/"+ida) : null;
+  DETAIL.B = idb ? await jget("/api/runs/"+idb) : null;
+  $("#colA").innerHTML = DETAIL.A ? renderCard(DETAIL.A,"a") : emptyCard();
+  $("#colB").innerHTML = DETAIL.B ? renderCard(DETAIL.B,"b") : emptyCard();
+  renderOverlay();
+}
+
+function emptyCard(){ return `<div class="card"><div class="empty">No run selected.</div></div>`; }
+
+// mean of by_X ratio maps across a batch's rows -> [{label,ratio,solved,total}]
+function aggBy(rows, key){
+  const acc = {};
+  for(const r of rows){
+    const m = (r.coverage||{})[key] || {};
+    for(const k in m){
+      const c = acc[k] || (acc[k]={r:0,s:0,t:0,n:0});
+      c.r+=m[k].ratio; c.s+=m[k].solved; c.t+=m[k].total; c.n++;
+    }
+  }
+  return Object.entries(acc).map(([label,c])=>({
+    label, ratio:c.n?c.r/c.n:0, solved:Math.round(c.s/(c.n||1)), total:Math.round(c.t/(c.n||1))
+  }));
+}
+
+function bars(items, color, sortByTotal){
+  if(!items.length) return `<div class="empty">no data</div>`;
+  items.sort((a,b)=> sortByTotal ? b.total-a.total : (a.label.localeCompare(b.label,undefined,{numeric:true})));
+  return `<div class="bars">` + items.map(it=>`
+    <div class="bar">
+      <span class="lbl" title="${it.label}">${it.label}</span>
+      <span class="track"><span class="fill" style="width:${(it.ratio*100).toFixed(1)}%;background:var(--${color})"></span></span>
+      <span class="num">${(it.ratio*100).toFixed(0)}% · ${it.solved}/${it.total}</span>
+    </div>`).join("") + `</div>`;
+}
+
+function metric(k,v){ return `<div class="metric"><div class="k">${k}</div><div class="v">${v}</div></div>`; }
+
+function renderCard(detail, color){
+  const m = detail.manifest||{}, s = detail.summary||{}, rows = detail.rows||[];
+  const g = m.git||{}, pb = g.pt_bench||{}, ar = g.agent_repo||{};
+  const ci = s.coverage_ci95_halfwidth;
+  const cov = `${pct(s.coverage_mean)} <small>${ci?("± "+(ci*100).toFixed(1)):""}</small>`;
+  const cab = s.coverage_at_budget_mean;
+  const prov = `<span class="prov">
+      ${(m.started_at||"").replace("T"," ")} ·
+      pt-bench <code>${short(pb.sha)}</code>${pb.dirty?'<span class="dirty"> ✎</span>':''}${
+      ar.sha?` · agent <code>${short(ar.sha)}</code>${ar.dirty?'<span class="dirty"> ✎</span>':''}`:''}
+    </span>`;
+  return `<div class="card">
+    <h2>${m.arm||"?"}</h2>
+    <div class="badges">
+      <span class="chip mode">${m.mode||""}</span>
+      <span class="chip">${m.scenario||""}</span>
+      ${m.model?`<span class="chip">${m.model}</span>`:""}
+      <span class="chip">${s.n_completed??0}/${s.n_runs??0} runs</span>
+    </div>
+    ${prov}
+    <div class="metrics">
+      ${metric("Coverage", cov)}
+      ${metric("Weighted", pct(s.coverage_weighted_mean))}
+      ${metric("Iterations", num(s.iterations_mean,1))}
+      ${metric("First solve", s.first_solve_s_mean!=null?num(s.first_solve_s_mean,0)+"s":"–")}
+      ${metric("Cost", s.cost_usd_mean!=null?"$"+num(s.cost_usd_mean,2):"–")}
+      ${metric("Tool calls", num(s.tool_calls_mean,0))}
+    </div>
+    <div class="section"><h3>Coverage at budget</h3>${lineChart([series(cab,color)], color)}</div>
+    <div class="section"><h3>By category</h3>${bars(aggBy(rows,"by_category"), color, true)}</div>
+    <div class="section"><h3>By difficulty</h3>${bars(aggBy(rows,"by_difficulty"), color, false)}</div>
+  </div>`;
+}
+
+// coverage_at_budget_mean {"0.25":r,...} -> series points incl. origin
+function series(cab, color){
+  const pts = [{x:0,y:0}];
+  if(cab) for(const k of Object.keys(cab).sort((a,b)=>+a-+b)) pts.push({x:+k*100, y:cab[k]});
+  return {color, points:pts};
+}
+
+function lineChart(seriesList, colorHint){
+  const W=520,H=170,P={l:38,r:12,t:12,b:26};
+  const iw=W-P.l-P.r, ih=H-P.t-P.b;
+  let ymax = 0; seriesList.forEach(s=>s.points.forEach(p=>ymax=Math.max(ymax,p.y)));
+  ymax = ymax>0 ? ymax*1.15 : 1;
+  const X = x => P.l + (x/100)*iw;
+  const Y = y => P.t + ih - (y/ymax)*ih;
+  const grid = [0,25,50,75,100].map(gx=>`<line class="grid" x1="${X(gx)}" y1="${P.t}" x2="${X(gx)}" y2="${P.t+ih}"/>`).join("");
+  const xticks = [0,25,50,75,100].map(gx=>`<text class="tick" x="${X(gx)}" y="${H-8}" text-anchor="middle">${gx}%</text>`).join("");
+  const yt=[0,ymax/2,ymax].map(gy=>`<text class="tick" x="${P.l-6}" y="${Y(gy)+3}" text-anchor="end">${(gy*100).toFixed(0)}%</text>`).join("");
+  const lines = seriesList.map(s=>{
+    const d = s.points.map((p,i)=>`${i?"L":"M"}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ");
+    const dots = s.points.map(p=>`<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3" fill="var(--${s.color})"/>`).join("");
+    return `<path d="${d}" fill="none" stroke="var(--${s.color})" stroke-width="2.2" stroke-linejoin="round"/>${dots}`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img">
+    ${grid}
+    <line class="axis" x1="${P.l}" y1="${P.t+ih}" x2="${W-P.r}" y2="${P.t+ih}"/>
+    <line class="axis" x1="${P.l}" y1="${P.t}" x2="${P.l}" y2="${P.t+ih}"/>
+    ${yt}${xticks}${lines}
+  </svg>`;
+}
+
+function renderOverlay(){
+  const A=DETAIL.A, B=DETAIL.B, box=$("#overlay");
+  if(!A && !B){ box.hidden=true; return; }
+  box.hidden=false;
+  const sl=[];
+  if(A) sl.push(series((A.summary||{}).coverage_at_budget_mean,"a"));
+  if(B) sl.push(series((B.summary||{}).coverage_at_budget_mean,"b"));
+  $("#overlayChart").innerHTML = lineChart(sl);
+  $("#legA").textContent = A ? `A · ${A.manifest.arm} (${A.manifest.mode})` : "A";
+  $("#legB").textContent = B ? `B · ${B.manifest.arm} (${B.manifest.mode})` : "B";
+}
+
+boot().catch(e=>{ document.querySelector(".wrap").innerHTML =
+  `<div class="empty">Failed to load results: ${e.message}. Is the server running and are there any runs yet?</div>`; });
+</script>
+</body>
+</html>

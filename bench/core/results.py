@@ -8,12 +8,26 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import statistics
 import subprocess
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 2
+
+
+def resolve_results_dir(cli_arg: str | None = None) -> Path:
+    """Where results live, kept OUT of the repo so they survive re-clones:
+    explicit arg > $PTBENCH_RESULTS_DIR > XDG data dir
+    (~/.local/share/pt-bench/results). Shared by the runner and the dashboard."""
+    if cli_arg:
+        return Path(os.path.expanduser(cli_arg))
+    if os.environ.get("PTBENCH_RESULTS_DIR"):
+        return Path(os.path.expanduser(os.environ["PTBENCH_RESULTS_DIR"]))
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"),
+                                                           ".local", "share")
+    return Path(base) / "pt-bench" / "results"
 
 
 def git_sha(path: str | Path | None) -> dict[str, Any] | None:

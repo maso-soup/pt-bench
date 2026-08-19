@@ -32,18 +32,6 @@ MAX_CONTINUATION_ITERS = 10  # safety cap on max-coverage re-invocations
 MODES = ("autonomous", "max-coverage")
 
 
-def resolve_results_dir(cli_arg: str | None) -> Path:
-    """Where results live, kept OUT of the repo so they survive re-clones:
-    --results-dir > $PTBENCH_RESULTS_DIR > XDG data dir (~/.local/share/pt-bench)."""
-    if cli_arg:
-        return Path(os.path.expanduser(cli_arg))
-    if os.environ.get("PTBENCH_RESULTS_DIR"):
-        return Path(os.path.expanduser(os.environ["PTBENCH_RESULTS_DIR"]))
-    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"),
-                                                           ".local", "share")
-    return Path(base) / "pt-bench" / "results"
-
-
 # ${VAR} and ${VAR:-default} expansion (os.path.expandvars lacks :- defaults).
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
@@ -231,7 +219,7 @@ def main() -> None:
     args = ap.parse_args()
 
     progress_enabled = args.progress if args.progress is not None else sys.stdout.isatty()
-    results_dir = resolve_results_dir(args.results_dir)
+    results_dir = results.resolve_results_dir(args.results_dir)
 
     arm = load_arm(args.arm)
     rows, batch_dir = run_cell(arm, args.scenario, args.repeats, args.keep_up,
