@@ -157,20 +157,25 @@ A local web UI to compare any two runs side by side (coverage, coverage-at-budge
 curves, efficiency, by-category / by-difficulty, and git-SHA provenance). It ships
 with the benchmark — no extra install — and reads the same results dir.
 
-```bash
-pt-bench-dashboard            # http://127.0.0.1:8008  (--results-dir / --port to override)
-```
-
-Or start it automatically with a run and leave it up afterward:
+**It auto-starts with every run** (detached, on http://127.0.0.1:8008) and stays up
+afterward, so results are always viewable — you don't have to do anything:
 
 ```bash
-pt-bench --arm ... --scenario juice-shop --dashboard   # detached; keeps serving after the run finishes
+pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --repeats 5
+# ...run finishes... dashboard is still up at http://127.0.0.1:8008
 ```
 
-`--dashboard` launches the dashboard as a detached background process (idempotent
-per `--dashboard-port`, default 8008) that outlives the run, so you can keep reading
-results after the benchmark ends. It stays up until you reboot or stop it
-(`pkill -f bench.dashboard.app`); it does not auto-start on boot.
+You can also start it on its own, without running a benchmark:
+
+```bash
+pt-bench --dashboard          # just start the dashboard, then exit
+pt-bench-dashboard            # same thing (dedicated command)
+# both take --port / --results-dir
+```
+
+It's idempotent (one dashboard per `--dashboard-port`, default 8008) and stays up
+until you reboot or stop it (`pkill -f bench.dashboard.app`); it does not auto-start
+on boot. Add `--no-dashboard` to a run to skip launching it.
 
 A `--repeats N` run appears as one selectable run (the mean of its N repetitions,
 with a 95% CI and an `N/N runs` label); the picker shows `×N` so a repeats=1 run is

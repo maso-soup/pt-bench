@@ -237,8 +237,9 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="pt-bench", description="Run one pt-bench cell.")
-    ap.add_argument("--arm", required=True)
-    ap.add_argument("--scenario", required=True)
+    ap.add_argument("--arm", help="arm to run (omit only when using --dashboard alone)")
+    ap.add_argument("--scenario",
+                    help="scenario to run (omit only when using --dashboard alone)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--mode", choices=MODES, default="autonomous",
                     help="autonomous: one run, agent stops when it decides (honest "
@@ -257,16 +258,29 @@ def main() -> None:
                     help="where to store results (default: $PTBENCH_RESULTS_DIR or "
                          "~/.local/share/pt-bench/results; kept out of the repo)")
     ap.add_argument("--dashboard", action="store_true",
-                    help="start the results dashboard (detached; stays up after the "
-                         "run so you can keep reading it)")
+                    help="run alone (no --arm/--scenario) to just start the dashboard "
+                         "and exit; note the dashboard also auto-starts with every run")
+    ap.add_argument("--no-dashboard", action="store_true",
+                    help="do not auto-start the dashboard for this run")
     ap.add_argument("--dashboard-port", type=int, default=8008)
     args = ap.parse_args()
 
-    progress_enabled = args.progress if args.progress is not None else sys.stdout.isatty()
     results_dir = results.resolve_results_dir(args.results_dir)
 
+    # `pt-bench --dashboard` on its own just starts the dashboard (no benchmark).
+    if args.dashboard and not (args.arm and args.scenario):
+        ensure_dashboard(results_dir, args.dashboard_port)
+        return
+    if not (args.arm and args.scenario):
+        ap.error("--arm and --scenario are required "
+                 "(or run `pt-bench --dashboard` alone to just start the dashboard)")
+
+    progress_enabled = args.progress if args.progress is not None else sys.stdout.isatty()
+
+    # The dashboard auto-starts with every run so results are always viewable
+    # (detached; stays up afterward). Opt out with --no-dashboard.
     dashboard_url = None
-    if args.dashboard:  # start early so it's viewable during the run and afterward
+    if not args.no_dashboard:
         dashboard_url = ensure_dashboard(results_dir, args.dashboard_port)
 
     arm = load_arm(args.arm, args.arms_dir)
