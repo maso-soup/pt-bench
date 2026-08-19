@@ -1,4 +1,0 @@
-{"ts": 1786566074.222831, "tool": "http_get", "args": {"url": "http://localhost:3000/"}, "result": {"status": 200}, "duration_s": 0.017}
-{"ts": 1786566074.2266629, "tool": "http_get", "args": {"url": "http://localhost:3000/ftp/acquisitions.md"}, "result": {"status": 200}, "duration_s": 0.004}
-{"ts": 1786566074.229845, "tool": "http_get", "args": {"url": "http://localhost:3000/metrics"}, "result": {"status": 200}, "duration_s": 0.003}
-{"ts": 1786566074.232019, "tool": "http_get", "args": {"url": "http://localhost:3000/robots.txt"}, "result": {"status": 200}, "duration_s": 0.002}
