@@ -48,26 +48,42 @@ run.py                 back-compat shim for `python run.py ...`
 # results are written outside the repo (XDG data dir) — see Results storage below
 ```
 
-## Quick start
+## Setup
 
-Prerequisites: Docker running (for the target), and — only for the Claude Code
-arms — the `claude` CLI installed and authenticated. Nothing else is host-specific;
-arm `repo` paths are portable (see below), so a fresh clone needs no file edits.
+Run these once, top to bottom. (Kali/Debian shown; on macOS install Docker Desktop
+and skip the `apt` line.)
 
 ```bash
-git clone <url> pt-bench && cd pt-bench
-python3 -m venv .venv && ./.venv/bin/pip install -e .   # installs deps + the `pt-bench` command
+# 1. System packages (one time)
+sudo apt update && sudo apt install -y docker.io python3-venv python3-full
+sudo systemctl enable --now docker
 
-# 1) Validate the whole harness with the free no-op adapter (no claude/Docker cost):
-./.venv/bin/pt-bench --arm example__noop --scenario juice-shop --repeats 1
+# 2. Install pt-bench inside a virtualenv  (use the venv — do NOT run `sudo pip`)
+git clone <url> pt-bench
+cd pt-bench
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
 
-# 2) Benchmark pt-agent. Point PT_AGENT_REPO at your pt-agent checkout, or drop it
-#    at ~/pt-agent (the default). See bench/adapters/claude-code/README.md.
+# 3. Check it works (free — just downloads the target container)
+pt-bench --arm example__noop --scenario juice-shop --repeats 1
+```
+
+**In every new terminal**, activate the venv first, then use `pt-bench`:
+
+```bash
+cd pt-bench && source .venv/bin/activate
+```
+
+## Running benchmarks
+
+```bash
+# pt-agent needs the `claude` CLI installed + logged in, and PT_AGENT_REPO pointing
+# at your pt-agent checkout (or just put it at ~/pt-agent).
 export PT_AGENT_REPO=/path/to/pt-agent
-./.venv/bin/pt-bench --arm pt-agent__opus-4.8   --scenario juice-shop --repeats 5
 
-# 3) Baseline control (same model, no scaffolding) for the A/B:
-./.venv/bin/pt-bench --arm flat-prompt__opus-4.8 --scenario juice-shop --repeats 5
+pt-bench --arm pt-agent__opus-4.8    --scenario juice-shop --repeats 5   # the agent
+pt-bench --arm flat-prompt__opus-4.8 --scenario juice-shop --repeats 5   # baseline control
 ```
 
 **Portable `repo` paths.** An arm's `adapter_config.repo` may be absolute, relative
@@ -115,8 +131,8 @@ iterations.
 
 ```bash
 # baseline vs ceiling for the same arm
-./.venv/bin/pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --repeats 5
-./.venv/bin/pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
+pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --repeats 5
+pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
 ```
 
 ## Adding things
@@ -148,7 +164,7 @@ pt-bench-dashboard            # http://127.0.0.1:8008  (--results-dir / --port t
 Or start it automatically with a run and leave it up afterward:
 
 ```bash
-./.venv/bin/pt-bench --arm ... --scenario juice-shop --dashboard   # detached; keeps serving after the run finishes
+pt-bench --arm ... --scenario juice-shop --dashboard   # detached; keeps serving after the run finishes
 ```
 
 `--dashboard` launches the dashboard as a detached background process (idempotent
