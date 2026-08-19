@@ -12,6 +12,8 @@ import argparse
 import datetime as dt
 import os
 import re
+import socket
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -69,6 +71,39 @@ def adapter_cmd(adapter_name: str) -> list[str]:
     if not entry.exists():
         sys.exit(f"adapter has no adapter.py: {entry}")
     return [sys.executable, str(entry)]
+
+
+def _port_open(host: str, port: int) -> bool:
+    with socket.socket() as s:
+        s.settimeout(0.3)
+        return s.connect_ex((host, port)) == 0
+
+
+def ensure_dashboard(results_dir: Path, port: int, host: str = "127.0.0.1") -> str:
+    """Start the results dashboard as a DETACHED background process so it outlives
+    this run — you can keep reading results after the benchmark finishes. Idempotent:
+    if something is already listening on the port, reuse it instead of spawning a
+    duplicate. Stop it later with `pkill -f dashboard/app.py`."""
+    url = f"http://{host}:{port}"
+    if _port_open(host, port):
+        print(f"  dashboard already up: {url}")
+        return url
+    results_dir.mkdir(parents=True, exist_ok=True)
+    log = (results_dir / "dashboard.log").open("a")
+    try:
+        subprocess.Popen(
+            [sys.executable, str(ROOT / "dashboard" / "app.py"),
+             "--results-dir", str(results_dir), "--host", host, "--port", str(port)],
+            stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            start_new_session=True)  # detach: survives this process exiting
+    finally:
+        log.close()  # the child keeps its own inherited fd
+    for _ in range(30):  # wait up to ~3s for it to bind
+        if _port_open(host, port):
+            break
+        time.sleep(0.1)
+    print(f"  dashboard started (detached): {url}")
+    return url
 
 
 def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
@@ -216,10 +251,18 @@ def main() -> None:
     ap.add_argument("--results-dir", default=None,
                     help="where to store results (default: $PTBENCH_RESULTS_DIR or "
                          "~/.local/share/pt-bench/results; kept out of the repo)")
+    ap.add_argument("--dashboard", action="store_true",
+                    help="start the results dashboard (detached; stays up after the "
+                         "run so you can keep reading it)")
+    ap.add_argument("--dashboard-port", type=int, default=8008)
     args = ap.parse_args()
 
     progress_enabled = args.progress if args.progress is not None else sys.stdout.isatty()
     results_dir = results.resolve_results_dir(args.results_dir)
+
+    dashboard_url = None
+    if args.dashboard:  # start early so it's viewable during the run and afterward
+        dashboard_url = ensure_dashboard(results_dir, args.dashboard_port)
 
     arm = load_arm(args.arm)
     rows, batch_dir = run_cell(arm, args.scenario, args.repeats, args.keep_up,
@@ -231,6 +274,8 @@ def main() -> None:
     for k, v in results.aggregate(rows).items():
         print(f"  {k}: {v}")
     print(f"\nresults: {batch_dir}")
+    if dashboard_url:
+        print(f"dashboard (still up): {dashboard_url}")
 
 
 if __name__ == "__main__":

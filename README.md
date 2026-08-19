@@ -142,6 +142,17 @@ with the benchmark — no extra install — and reads the same results dir.
 pt-bench-dashboard            # http://127.0.0.1:8008  (--results-dir / --port to override)
 ```
 
+Or start it automatically with a run and leave it up afterward:
+
+```bash
+python run.py --arm ... --scenario juice-shop --dashboard   # detached; keeps serving after the run finishes
+```
+
+`--dashboard` launches the dashboard as a detached background process (idempotent
+per `--dashboard-port`, default 8008) that outlives the run, so you can keep reading
+results after the benchmark ends. It stays up until you reboot or stop it
+(`pkill -f dashboard/app.py`); it does not auto-start on boot.
+
 A `--repeats N` run appears as one selectable run (the mean of its N repetitions,
 with a 95% CI and an `N/N runs` label); the picker shows `×N` so a repeats=1 run is
 distinct from a repeats=5 one. See [dashboard/README.md](dashboard/README.md).
