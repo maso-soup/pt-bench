@@ -35,13 +35,16 @@ an agent never changes core code.
 ## Layout
 
 ```
-bench/core/            scenario contract, grader, results, adapter invocation
+bench/core/            scenario contract, grader, results, resources, adapter invocation
 bench/scenarios/       one dir per environment (juice_shop/ ships in v1)
-adapters/              PROTOCOL.md, JSON schemas, one dir per agent wrapper
+bench/adapters/        PROTOCOL.md, JSON schemas, one dir per agent wrapper
   example-python/      minimal no-op reference adapter (validates the harness)
   claude-code/         drives any Claude Code repo (e.g. pt-agent) headless
-arms/                  (adapter x model) configs — what you actually run
-run.py                 execute one cell for N repetitions
+bench/arms/            shipped default (adapter x model) configs; add your own in
+                       ~/.config/pt-bench/arms (or --arms-dir / $PTBENCH_ARMS_DIR)
+bench/dashboard/       optional local web UI (the pt-bench-dashboard command)
+bench/cli.py           the runner; installs as the `pt-bench` console command
+run.py                 back-compat shim for `python run.py ...`
 # results are written outside the repo (XDG data dir) — see Results storage below
 ```
 
@@ -53,24 +56,24 @@ arm `repo` paths are portable (see below), so a fresh clone needs no file edits.
 
 ```bash
 git clone <url> pt-bench && cd pt-bench
-python3 -m venv .venv && ./.venv/bin/pip install -e .   # installs PyYAML
+python3 -m venv .venv && ./.venv/bin/pip install -e .   # installs deps + the `pt-bench` command
 
 # 1) Validate the whole harness with the free no-op adapter (no claude/Docker cost):
-./.venv/bin/python run.py --arm example__noop --scenario juice-shop --repeats 1
+./.venv/bin/pt-bench --arm example__noop --scenario juice-shop --repeats 1
 
 # 2) Benchmark pt-agent. Point PT_AGENT_REPO at your pt-agent checkout, or drop it
-#    at ~/pt-agent (the default). See adapters/claude-code/README.md.
+#    at ~/pt-agent (the default). See bench/adapters/claude-code/README.md.
 export PT_AGENT_REPO=/path/to/pt-agent
-./.venv/bin/python run.py --arm pt-agent__opus-4.8   --scenario juice-shop --repeats 5
+./.venv/bin/pt-bench --arm pt-agent__opus-4.8   --scenario juice-shop --repeats 5
 
 # 3) Baseline control (same model, no scaffolding) for the A/B:
-./.venv/bin/python run.py --arm flat-prompt__opus-4.8 --scenario juice-shop --repeats 5
+./.venv/bin/pt-bench --arm flat-prompt__opus-4.8 --scenario juice-shop --repeats 5
 ```
 
 **Portable `repo` paths.** An arm's `adapter_config.repo` may be absolute, relative
-to the pt-bench root (e.g. `baselines/flat-prompt`), or use `~` and
-`${VAR:-default}` expansion (e.g. `${PT_AGENT_REPO:-~/pt-agent}`). The runner
-resolves it at load time, so the shipped arms work unchanged on any host.
+a materialized baseline dir (`baselines/<name>`, used by the flat-prompt control),
+or use `~` and `${VAR:-default}` expansion (e.g. `${PT_AGENT_REPO:-~/pt-agent}`).
+The runner resolves it at load time, so the shipped arms work unchanged on any host.
 
 Each run provisions a fresh Juice Shop container, drives the agent, reads the
 solved-challenge state, grades, and tears the container down.
@@ -112,15 +115,15 @@ iterations.
 
 ```bash
 # baseline vs ceiling for the same arm
-./.venv/bin/python run.py --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --repeats 5
-./.venv/bin/python run.py --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
+./.venv/bin/pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --repeats 5
+./.venv/bin/pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
 ```
 
 ## Adding things
 
-- **A new agent** → new dir under `adapters/` satisfying `PROTOCOL.md`, plus an
-  arm file. (For any Claude Code repo, reuse the `claude-code` adapter and just
-  point `extra.repo` at it.)
+- **A new agent** → new dir under `bench/adapters/` satisfying `PROTOCOL.md`, plus
+  an arm file (in `bench/arms/` or `~/.config/pt-bench/arms`). For any Claude Code
+  repo, reuse the `claude-code` adapter and just point `extra.repo` at it.
 - **A new target** → new dir under `bench/scenarios/` implementing `Scenario`,
   and one line in `bench/core/registry.py`.
 
@@ -145,17 +148,17 @@ pt-bench-dashboard            # http://127.0.0.1:8008  (--results-dir / --port t
 Or start it automatically with a run and leave it up afterward:
 
 ```bash
-python run.py --arm ... --scenario juice-shop --dashboard   # detached; keeps serving after the run finishes
+./.venv/bin/pt-bench --arm ... --scenario juice-shop --dashboard   # detached; keeps serving after the run finishes
 ```
 
 `--dashboard` launches the dashboard as a detached background process (idempotent
 per `--dashboard-port`, default 8008) that outlives the run, so you can keep reading
 results after the benchmark ends. It stays up until you reboot or stop it
-(`pkill -f dashboard/app.py`); it does not auto-start on boot.
+(`pkill -f bench.dashboard.app`); it does not auto-start on boot.
 
 A `--repeats N` run appears as one selectable run (the mean of its N repetitions,
 with a 95% CI and an `N/N runs` label); the picker shows `×N` so a repeats=1 run is
-distinct from a repeats=5 one. See [dashboard/README.md](dashboard/README.md).
+distinct from a repeats=5 one. See [bench/dashboard/README.md](bench/dashboard/README.md).
 
 ## License
 

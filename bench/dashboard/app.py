@@ -2,10 +2,8 @@
 """pt-bench dashboard — a small local web UI to compare runs side by side.
 
 Reads the flat-JSON results tree directly (no database) and serves a single-page
-compare view. Isolated, optional component:
-
-    pip install -e '.[dashboard]'
-    python dashboard/app.py            # or: --results-dir / --port
+compare view. Runs as `pt-bench-dashboard` (a console command) or
+`python -m bench.dashboard.app`; options: --results-dir / --host / --port.
 
 A "run" is a batch dir (one per cell) containing manifest.json + summary.json and
 one r<i>/ per repetition. The results dir is resolved the same way the runner
@@ -15,14 +13,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, send_from_directory
 
+from bench.core import results as results_mod
+
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
-from bench.core import results as results_mod  # noqa: E402
 
 app = Flask(__name__)
 RESULTS_DIR = results_mod.resolve_results_dir()  # overridden in main()

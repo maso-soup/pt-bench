@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "pt-bench"
 version = "0.1.0"
@@ -15,10 +19,22 @@ dependencies = [
 dev = ["jsonschema>=4.0", "pytest>=8.0"]
 
 [project.scripts]
-pt-bench-dashboard = "dashboard.app:main"
+pt-bench = "bench.cli:main"
+pt-bench-dashboard = "bench.dashboard.app:main"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["bench*", "dashboard*"]
+include = ["bench*"]
 
+# Non-Python runtime assets shipped inside the package so a real (non-editable)
+# install works. Adapter subdirs (e.g. claude-code/) aren't importable packages —
+# their scripts are executed by path — so they're carried as data. MANIFEST.in
+# mirrors this for sdists.
 [tool.setuptools.package-data]
-dashboard = ["static/*"]
+"bench.adapters" = ["*", "**/*"]
+"bench.baselines" = ["*", "**/*"]
+"bench.arms" = ["*.yaml"]
+"bench.dashboard" = ["static/*"]
+"bench.scenarios.juice_shop" = ["*.yml", "*.yaml"]
