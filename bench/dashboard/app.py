@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, send_from_directory
@@ -72,6 +73,23 @@ def api_run(rid: str):
         "summary": _read(d / "summary.json"),
         "rows": [r for r in rows if r],
     })
+
+
+@app.delete("/api/runs/<path:rid>")
+def api_delete_run(rid: str):
+    """Delete one run batch dir from disk, then prune any now-empty
+    arm/scenario parent dirs. Path-traversal-guarded by _safe_batch_dir."""
+    d = _safe_batch_dir(rid)
+    shutil.rmtree(d)
+    root = RESULTS_DIR.resolve()
+    p = d.parent
+    while p != root and root in p.parents:
+        try:
+            p.rmdir()  # only removes it if empty
+        except OSError:
+            break
+        p = p.parent
+    return jsonify({"ok": True, "deleted": rid})
 
 
 @app.get("/")

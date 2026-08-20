@@ -37,6 +37,10 @@
   h2{margin:0 0 2px;font-size:16px;font-weight:650}
   h3{margin:0 0 10px;font-size:11px;font-weight:700;color:var(--muted);
     text-transform:uppercase;letter-spacing:.05em}
+  .card-head{display:flex;align-items:center;gap:10px}
+  .del{margin-left:auto;border:1px solid var(--line);background:transparent;color:var(--muted);
+    border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
+  .del:hover{border-color:var(--b);color:var(--b)}
   .badges{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
   .chip{background:var(--chip);border-radius:999px;padding:3px 9px;font-size:12px;color:var(--muted)}
   .chip.mode{font-weight:600;color:var(--ink)}
@@ -104,17 +108,37 @@ function optionLabel(r){
   return `${r.arm} · ${r.scenario} · ${r.mode} · ×${r.repeats} · ${d}  (${pct(r.coverage_mean)})`;
 }
 
+function buildOptions(){
+  return `<option value="">— select a run —</option>` +
+    RUNS.map(r=>`<option value="${r.id}">${optionLabel(r)}</option>`).join("");
+}
+
 async function boot(){
   RUNS = await jget("/api/runs");
-  for(const sel of [$("#selA"),$("#selB")]){
-    sel.innerHTML = `<option value="">— select a run —</option>` +
-      RUNS.map(r=>`<option value="${r.id}">${optionLabel(r)}</option>`).join("");
-  }
+  $("#selA").innerHTML = $("#selB").innerHTML = buildOptions();
   if(RUNS[0]) $("#selA").value = RUNS[0].id;
   if(RUNS[1]) $("#selB").value = RUNS[1].id;
   $("#selA").onchange = refresh; $("#selB").onchange = refresh;
   refresh();
 }
+
+async function reloadRuns(){
+  RUNS = await jget("/api/runs");
+  const opts = buildOptions();
+  for(const sel of [$("#selA"),$("#selB")]){
+    const cur = sel.value;
+    sel.innerHTML = opts;
+    sel.value = RUNS.some(r=>r.id===cur) ? cur : "";  // keep selection if it survives
+  }
+}
+
+window.deleteRun = async (id) => {
+  if(!confirm(`Delete this run permanently?\n\n${id}\n\nThis removes it from disk and cannot be undone.`)) return;
+  const r = await fetch("/api/runs/" + id, {method:"DELETE"});
+  if(!r.ok){ alert("Delete failed (HTTP " + r.status + ")"); return; }
+  await reloadRuns();
+  await refresh();
+};
 
 let DETAIL = {A:null,B:null};
 async function refresh(){
@@ -168,7 +192,10 @@ function renderCard(detail, color){
       ar.sha?` · agent <code>${short(ar.sha)}</code>${ar.dirty?'<span class="dirty"> ✎</span>':''}`:''}
     </span>`;
   return `<div class="card">
-    <h2>${m.arm||"?"}</h2>
+    <div class="card-head">
+      <h2>${m.arm||"?"}</h2>
+      <button class="del" onclick="deleteRun('${detail.id}')">Delete</button>
+    </div>
     <div class="badges">
       <span class="chip mode">${m.mode||""}</span>
       <span class="chip">${m.scenario||""}</span>

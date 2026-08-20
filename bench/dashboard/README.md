@@ -28,6 +28,8 @@ so it shows whatever you've already run.
   tool calls, and **by-category / by-difficulty** breakdowns.
 - Provenance (git SHA of pt-bench and the agent repo, dirty flag) from each run's
   `manifest.json`, so a comparison is anchored to the code that produced it.
+- **Delete** a run from either card (with a confirm prompt) — removes its batch dir
+  from disk so you don't have to clean up the results directory by hand.
 
 ## Endpoints (if you want the raw data)
 
