@@ -26,7 +26,7 @@ working directory is arbitrary; all paths it needs are inside the spec.
   "target_url": "http://localhost:3000",
   "scope": "Authorized web app pentest of http://localhost:3000 only ...",
   "model": "claude-opus-4-8",
-  "budget": { "tool_calls": 150, "usd": 15, "wall_time_s": 3600 },
+  "budget": { "usd": 15, "tokens": 10000000, "wall_time_s": 3600 },
   "workdir": "/abs/path/to/this/run",
   "extra": { "repo": "/Users/mason/pt-agent" }
 }
@@ -34,8 +34,15 @@ working directory is arbitrary; all paths it needs are inside the spec.
 
 - `target_url` / `scope` — what the agent is told about the target.
 - `model` — model id the adapter should run the agent on (adapter-specific meaning).
-- `budget` — advisory caps. `wall_time_s` is also enforced hard by the runner
-  as a subprocess timeout; the adapter should self-limit against the others.
+- `budget` — resource caps for the run. `wall_time_s`, `usd`, and `tokens` are
+  hard limits: the adapter MUST stop the agent when any is reached and report
+  `status: budget_exceeded`. The runner additionally enforces `wall_time_s` as a
+  subprocess-timeout backstop and, in max-coverage mode, decrements all three
+  across continuation iterations so they cap the whole cell. Any field may be
+  null (that dimension is uncapped).
+  `usd`/`tokens` enforcement needs the streamed usage, so it lives in the adapter
+  (the only component that sees incremental cost); an adapter that emits no usage
+  can enforce only `wall_time_s`.
 - `workdir` — the adapter MUST write all output artifacts here.
 - `extra` — adapter-specific config passed straight through from the arm file.
 

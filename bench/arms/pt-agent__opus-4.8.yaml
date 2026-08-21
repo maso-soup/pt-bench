@@ -25,6 +25,10 @@ adapter_config:
     - ~/pt-agent-output
     - ~/.claude/projects
 budget:
-  tool_calls: 150              # advisory (soft) in v1
-  usd: 15                      # advisory (soft) in v1
-  wall_time_s: 1800            # enforced by the adapter, with a runner backstop
+  # All three caps are hard: the claude-code adapter stops the run when any is hit
+  # (tokens/USD from the streamed usage, wall time in-loop), and the runner enforces
+  # wall time as a subprocess backstop and totals every cap across max-coverage
+  # continuation iterations.
+  usd: 15                      # enforced: stops when cumulative cost exceeds this
+  tokens: 10000000             # enforced: stops when total (input+output) tokens exceed this
+  wall_time_s: 1800            # enforced: adapter in-loop + runner backstop

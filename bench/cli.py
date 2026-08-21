@@ -107,8 +107,34 @@ def ensure_dashboard(results_dir: Path, port: int, host: str = "127.0.0.1") -> s
     return url
 
 
+def _budget_code(reason: str) -> str:
+    """Map a budget_exceeded reason string to which configured limit was hit."""
+    r = (reason or "").lower()
+    if "wall" in r:
+        return "budget_wall"
+    if "token" in r:
+        return "budget_tokens"
+    if "usd" in r or "$" in (reason or ""):
+        return "budget_usd"
+    return "budget"
+
+
+def _classify_stop(status: dict) -> dict:
+    """Turn an adapter terminal status into a structured stop reason
+    {code, detail}. Used for autonomous runs and for adapter-side limit hits."""
+    st = status.get("status")
+    reason = status.get("reason", "") or ""
+    if st == "completed":
+        return {"code": "agent_completed", "detail": "agent stopped on its own"}
+    if st == "error":
+        return {"code": "error", "detail": reason}
+    if st == "budget_exceeded":
+        return {"code": _budget_code(reason), "detail": reason}
+    return {"code": "unknown", "detail": reason}
+
+
 def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
-           mode: str) -> tuple[dict, list[Path]]:
+           mode: str) -> tuple[dict, list[Path], dict]:
     """Run the adapter once (autonomous) or in a continuation loop (max-coverage)
     until the agent solves everything, plateaus (an iteration adds no new solves),
     errors, or the total wall budget runs out. State is preserved across
@@ -119,7 +145,15 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
     max_iters = MAX_CONTINUATION_ITERS if mode == "max-coverage" else 1
     iter_dirs: list[Path] = []
     status: dict = {"status": "error", "reason": "no iteration ran"}
+    stop: dict = {"code": "error", "detail": "no iteration ran"}
     prev_solved = -1
+    # Budgets are TOTALS across the whole cell, so continuation iterations spend
+    # from one shared pool. Track what earlier iterations used and hand each
+    # iteration only what's left — otherwise every iteration would get the full
+    # token/USD budget again and a max-coverage run could spend N times the cap.
+    spent_tokens = 0.0
+    spent_usd = 0.0
+    hit_max = True  # cleared whenever we break out for a more specific reason
 
     for it in range(max_iters):
         remaining = None
@@ -127,12 +161,32 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
             remaining = int(total_wall - (time.time() - started))
             if remaining <= 0:
                 status = {"status": "budget_exceeded", "reason": "wall_time_s exhausted"}
+                stop = {"code": "budget_wall",
+                        "detail": "wall-time budget exhausted between iterations"}
+                hit_max = False
+                break
+        rem_tokens = None
+        if budget.tokens is not None:
+            rem_tokens = int(budget.tokens - spent_tokens)
+            if rem_tokens <= 0:
+                status = {"status": "budget_exceeded", "reason": "token budget exhausted"}
+                stop = {"code": "budget_tokens",
+                        "detail": "token budget exhausted between iterations"}
+                hit_max = False
+                break
+        rem_usd = None
+        if budget.usd is not None:
+            rem_usd = round(budget.usd - spent_usd, 4)
+            if rem_usd <= 0:
+                status = {"status": "budget_exceeded", "reason": "USD budget exhausted"}
+                stop = {"code": "budget_usd",
+                        "detail": "USD budget exhausted between iterations"}
+                hit_max = False
                 break
 
         iter_dir = workdir / f"iter-{it:02d}"
         iter_dirs.append(iter_dir)
-        it_budget = Budget(tool_calls=budget.tool_calls, usd=budget.usd,
-                           wall_time_s=remaining)
+        it_budget = Budget(usd=rem_usd, tokens=rem_tokens, wall_time_s=remaining)
         spec = adapter_mod.build_run_spec(
             handle=handle, model=arm.get("model"), budget=it_budget, workdir=iter_dir,
             adapter_config=arm.get("adapter_config", {}), continuation=(it > 0))
@@ -143,18 +197,41 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
             adapter_cmd=cmd, run_spec=spec, workdir=iter_dir, wall_time_s=backstop)
         print(f"  adapter status: {status.get('status')}")
 
+        # Draw this iteration's spend from the shared pool for the next one.
+        it_usage, _ = adapter_mod.read_artifacts(iter_dir)
+        spent_tokens += (it_usage.get("tokens_in") or 0) + (it_usage.get("tokens_out") or 0)
+        spent_usd += it_usage.get("cost_usd") or 0
+
         if mode != "max-coverage":
+            # Autonomous: the single run's terminal state is the whole story —
+            # the agent stopped itself, or the adapter hit a configured limit.
+            stop = _classify_stop(status)
+            hit_max = False
+            break
+        # max-coverage: the adapter erroring or hitting a hard limit ends the cell;
+        # continuing would just re-hit it.
+        if status.get("status") in ("error", "budget_exceeded"):
+            stop = _classify_stop(status)
+            hit_max = False
             break
         solved = len(scenario.oracle(handle).solved)
         print(f"  progress after iter {it}: {solved}/{len(gt)} solved")
-        if solved >= len(gt) or status.get("status") == "error":
+        if solved >= len(gt):
+            stop = {"code": "all_solved", "detail": f"solved all {len(gt)} findings"}
+            hit_max = False
             break
         if it > 0 and solved <= prev_solved:  # plateau: no new solves this iteration
             print(f"  plateau: iter {it} added no new solves — stopping")
+            stop = {"code": "plateau", "detail": f"iter {it} added no new solves"}
+            hit_max = False
             break
         prev_solved = solved
 
-    return status, iter_dirs
+    if hit_max:  # loop ran the full continuation cap without another stop firing
+        stop = {"code": "max_iterations",
+                "detail": f"reached the {max_iters}-iteration cap"}
+
+    return status, iter_dirs, stop
 
 
 def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
@@ -201,8 +278,8 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
 
             poller.start()
             try:
-                status, iter_dirs = _drive(arm, scenario, handle, gt, cmd, budget,
-                                           workdir, mode)
+                status, iter_dirs, stop_reason = _drive(arm, scenario, handle, gt,
+                                                        cmd, budget, workdir, mode)
             finally:
                 poller.stop()
 
@@ -220,12 +297,12 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
                 arm=arm["name"], scenario=scenario_id, repeat=i, model=arm.get("model"),
                 mode=mode, iterations=len(iter_dirs), status=status.get("status", "error"),
                 coverage=cov, curve=curve, efficiency=eff, derived=derived,
-                workdir=str(workdir))
+                workdir=str(workdir), stop_reason=stop_reason)
             results.write_row(row, workdir / "result.json")
             rows.append(row)
             print(f"  solved {cov['solved']}/{cov['total']}  "
                   f"(weighted {cov['coverage_weighted']})  iters={len(iter_dirs)}  "
-                  f"tool_calls={eff['tool_calls']}  cost={eff['cost_usd']}")
+                  f"stop={stop_reason['code']}  cost={eff['cost_usd']}")
         finally:
             if handle and not keep_up:
                 print("  tearing down ...")
