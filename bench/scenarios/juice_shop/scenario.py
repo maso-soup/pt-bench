@@ -55,7 +55,7 @@ class JuiceShopScenario(Scenario):
         return TargetHandle(
             target_url=url,
             scope=(f"Authorized web application penetration test of {url} only. "
-                   f"This host is an isolated OWASP Juice Shop instance."),
+                   f"This host is an isolated web application instance."),
             meta={"project": self.project, "ctf_key": self.ctf_key},
         )
 
