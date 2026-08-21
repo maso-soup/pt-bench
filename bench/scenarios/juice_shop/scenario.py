@@ -96,13 +96,30 @@ class JuiceShopScenario(Scenario):
             except Exception as e:  # noqa: BLE001 - readiness probe
                 last = str(e)
             time.sleep(3)
-        raise TimeoutError(f"Juice Shop not ready at {url} after "
-                           f"{self.ready_timeout_s}s (last: {last})")
+        raise TimeoutError(
+            f"Juice Shop not ready at {url} after {self.ready_timeout_s}s "
+            f"(last: {last}).\n"
+            f"The container may still be booting on a slow host — raise "
+            f"ready_timeout_s in bench/scenarios/juice_shop/config.yaml. If "
+            f"`docker logs` shows the app already serving and "
+            f"`curl {url}/api/Challenges/` works, the probe reached the target "
+            f"fine, so this is an app/boot issue, not networking (the probe "
+            f"already bypasses any HTTP(S)_PROXY).")
+
+
+# Talk to the target DIRECTLY, never through a proxy. The readiness probe and the
+# oracle always address the benchmark's own target (localhost or a known scenario
+# host), so a proxy is never correct here. An empty ProxyHandler disables proxy
+# resolution for this opener, so a set HTTP_PROXY/HTTPS_PROXY (intended for pulling
+# the image) can't hijack the loopback probe — a common failure on hosts behind a
+# corporate proxy, where curl's httpoxy guard hides the problem but urllib honors
+# the var and times out. Independent of NO_PROXY being set correctly.
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _http_get_json(url: str, timeout: int = 10) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _DIRECT_OPENER.open(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
