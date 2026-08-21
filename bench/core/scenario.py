@@ -47,16 +47,16 @@ class TargetHandle:
 
 @dataclass
 class Budget:
-    tool_calls: int | None = None
     usd: float | None = None
+    tokens: int | None = None          # total tokens (input + output)
     wall_time_s: int | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> "Budget":
         d = d or {}
         return cls(
-            tool_calls=d.get("tool_calls"),
             usd=d.get("usd"),
+            tokens=d.get("tokens"),
             wall_time_s=d.get("wall_time_s"),
         )
 

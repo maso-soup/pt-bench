@@ -22,16 +22,112 @@ import subprocess
 import time
 from pathlib import Path
 
+# Approximate list prices ($ per 1M tokens) as (input, output). Used ONLY to
+# derive a *running* cost estimate so a USD budget can preempt a run mid-stream,
+# before the `claude` CLI emits its authoritative total_cost_usd (which only
+# arrives in the terminal `result` event — too late to stop the run). On normal
+# completion the recorded cost is the CLI's own figure; these rates just need to
+# be close enough to stop in time. Override per-arm via adapter_config.prices
+# ({input_per_mtok, output_per_mtok, cache_write_per_mtok?, cache_read_per_mtok?}).
+_PRICES = {
+    "claude-opus-5":     (5.0, 25.0),
+    "claude-opus-4-8":   (5.0, 25.0),
+    "claude-opus-4-7":   (5.0, 25.0),
+    "claude-opus-4-6":   (5.0, 25.0),
+    "claude-sonnet-5":   (3.0, 15.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5":  (1.0, 5.0),
+    "claude-fable-5":    (10.0, 50.0),
+}
+
+
+class BudgetTracker:
+    """Accumulates usage from the streamed events and reports the first arm
+    budget breached, so a run stops on ANY of wall time, tokens, or USD — not
+    just wall time. Token totals come from per-turn `assistant` usage; the USD
+    figure prefers the CLI's own cumulative cost and falls back to a price-table
+    estimate for mid-run preemption before that number exists."""
+
+    def __init__(self, budget: dict, model: str | None, prices: dict | None = None):
+        self.max_wall = budget.get("wall_time_s")
+        self.max_tokens = budget.get("tokens")
+        self.max_usd = budget.get("usd")
+
+        in_rate, out_rate = _PRICES.get(model or "", (None, None))
+        p = prices or {}
+        self.in_rate = p.get("input_per_mtok", in_rate)
+        self.out_rate = p.get("output_per_mtok", out_rate)
+        self.cache_write_rate = p.get(
+            "cache_write_per_mtok", self.in_rate * 1.25 if self.in_rate else None)
+        self.cache_read_rate = p.get(
+            "cache_read_per_mtok", self.in_rate * 0.1 if self.in_rate else None)
+        self.priceable = self.in_rate is not None and self.out_rate is not None
+
+        self.tokens_in = 0
+        self.tokens_out = 0
+        self.saw_usage = False
+        self.derived_cost = 0.0
+        self.reported_cost = None  # authoritative total_cost_usd once the CLI emits it
+
+    def ingest(self, ev: dict) -> None:
+        etype = ev.get("type")
+        if etype == "assistant":
+            self._add_usage((ev.get("message") or {}).get("usage") or {})
+        elif etype == "result":
+            # result.usage can be last-turn-only on some CLI versions; only use it
+            # to seed totals if the assistant stream carried no usage at all.
+            if not self.saw_usage:
+                self._add_usage(ev.get("usage") or {})
+            if ev.get("total_cost_usd") is not None:
+                self.reported_cost = ev["total_cost_usd"]
+
+    def _add_usage(self, u: dict) -> None:
+        ci = int(u.get("input_tokens") or 0)
+        cw = int(u.get("cache_creation_input_tokens") or 0)
+        cr = int(u.get("cache_read_input_tokens") or 0)
+        co = int(u.get("output_tokens") or 0)
+        if ci or cw or cr or co:
+            self.saw_usage = True
+        self.tokens_in += ci + cw + cr  # all input-side tokens the model processed
+        self.tokens_out += co
+        if self.priceable:
+            self.derived_cost += (ci * self.in_rate + co * self.out_rate
+                                  + cw * self.cache_write_rate
+                                  + cr * self.cache_read_rate) / 1e6
+
+    @property
+    def total_tokens(self) -> int:
+        return self.tokens_in + self.tokens_out
+
+    @property
+    def cost(self) -> float | None:
+        if self.reported_cost is not None:
+            return self.reported_cost
+        return self.derived_cost if self.priceable else None
+
+    def breach(self, elapsed: float) -> tuple[str, str] | None:
+        """First budget exceeded as (dimension, reason), or None."""
+        if self.max_wall and elapsed > self.max_wall:
+            return ("wall_time_s",
+                    f"wall_time_s exceeded ({elapsed:.0f}s > {self.max_wall}s)")
+        if self.max_tokens and self.total_tokens > self.max_tokens:
+            return ("tokens",
+                    f"token budget exceeded ({self.total_tokens} > {self.max_tokens})")
+        c = self.cost
+        if self.max_usd and c is not None and c > self.max_usd:
+            return ("usd", f"USD budget exceeded (${c:.4g} > ${self.max_usd:.4g})")
+        return None
+
+    def usage_dict(self, elapsed: float) -> dict:
+        return {
+            "tokens_in": self.tokens_in if self.saw_usage else None,
+            "tokens_out": self.tokens_out if self.saw_usage else None,
+            "cost_usd": self.cost,
+            "wall_time_s": round(elapsed, 1),
+        }
+
 
 def build_prompt(spec: dict) -> str:
-    b = spec.get("budget") or {}
-    budget_line = ""
-    caps = [f"{k}={v}" for k, v in (
-        ("tool_calls", b.get("tool_calls")), ("USD", b.get("usd")),
-        ("seconds", b.get("wall_time_s"))) if v]
-    if caps:
-        budget_line = "\nApproximate budget for this engagement: " + ", ".join(caps) + "."
-
     if spec.get("continuation"):
         # max-coverage mode: the agent already worked this target and its progress
         # is in its state files. Push it to resume rather than restart or wrap up.
@@ -83,10 +179,19 @@ def main() -> None:
     if extra.get("skip_permissions"):
         cmd.append("--dangerously-skip-permissions")
 
-    wall = (spec.get("budget") or {}).get("wall_time_s")
+    tracker = BudgetTracker(spec.get("budget") or {}, spec.get("model"),
+                            extra.get("prices"))
+    if tracker.max_usd and not tracker.priceable and tracker.max_tokens is None:
+        # USD is the only cost-shaped cap and we can't price this model, so it can
+        # only be enforced post-hoc from the CLI's terminal cost. Wall time (and a
+        # token cap, if set) still bound the run. Surface it rather than silently
+        # under-enforcing.
+        print(f"[pt-bench] warning: no price for model {spec.get('model')!r}; USD "
+              "budget enforced only at end-of-run. Set adapter_config.prices or a "
+              "tokens budget for mid-run enforcement.", flush=True)
+
     raw = (workdir / "transcript.jsonl").open("w")
     tools = (workdir / "tool_calls.jsonl").open("w")
-    usage = {"tokens_in": None, "tokens_out": None, "cost_usd": None, "wall_time_s": None}
     status = {"status": "completed", "reason": ""}
     started = time.time()
 
@@ -95,47 +200,58 @@ def main() -> None:
                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
         for line in proc.stdout:
             raw.write(line)
-            _handle_event(line, tools, usage)
-            if wall and (time.time() - started) > wall:
+            ev = _parse(line)
+            if ev is not None:
+                _record_tools(ev, tools)
+                tracker.ingest(ev)
+            hit = tracker.breach(time.time() - started)
+            if hit:
                 proc.kill()
-                status = {"status": "budget_exceeded", "reason": "wall_time_s exceeded"}
+                status = {"status": "budget_exceeded", "reason": hit[1]}
                 break
         proc.wait(timeout=30)
     except FileNotFoundError:
         status = {"status": "error", "reason": "`claude` CLI not found on PATH"}
     except Exception as e:  # noqa: BLE001
-        status = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
+        # Don't let a slow reap after a budget kill mask why the run stopped.
+        if status.get("status") != "budget_exceeded":
+            status = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
     finally:
         raw.close()
         tools.close()
 
-    usage["wall_time_s"] = round(time.time() - started, 1)
-    (workdir / "usage.json").write_text(json.dumps(usage, indent=2))
+    # Post-hoc USD check: on a model we couldn't price mid-run, the authoritative
+    # total_cost_usd only lands with the terminal result event — enforce it here.
+    if status["status"] == "completed":
+        c = tracker.cost
+        if tracker.max_usd and c is not None and c > tracker.max_usd:
+            status = {"status": "budget_exceeded",
+                      "reason": f"USD budget exceeded (${c:.4g} > ${tracker.max_usd:.4g})"}
+
+    (workdir / "usage.json").write_text(
+        json.dumps(tracker.usage_dict(time.time() - started), indent=2))
     (workdir / "status.json").write_text(json.dumps(status, indent=2))
 
 
-def _handle_event(line: str, tools, usage: dict) -> None:
+def _parse(line: str) -> dict | None:
     line = line.strip()
     if not line:
-        return
+        return None
     try:
-        ev = json.loads(line)
+        return json.loads(line)
     except json.JSONDecodeError:
+        return None
+
+
+def _record_tools(ev: dict, tools) -> None:
+    if ev.get("type") != "assistant":
         return
-    etype = ev.get("type")
-    if etype == "assistant":
-        for block in ev.get("message", {}).get("content", []):
-            if isinstance(block, dict) and block.get("type") == "tool_use":
-                tools.write(json.dumps({
-                    "ts": time.time(), "tool": block.get("name"),
-                    "args": block.get("input", {}),
-                }) + "\n")
-    elif etype == "result":
-        u = ev.get("usage", {}) or {}
-        usage["tokens_in"] = u.get("input_tokens")
-        usage["tokens_out"] = u.get("output_tokens")
-        if ev.get("total_cost_usd") is not None:
-            usage["cost_usd"] = ev["total_cost_usd"]
+    for block in ev.get("message", {}).get("content", []):
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            tools.write(json.dumps({
+                "ts": time.time(), "tool": block.get("name"),
+                "args": block.get("input", {}),
+            }) + "\n")
 
 
 def _fail(workdir: Path, reason: str) -> None:

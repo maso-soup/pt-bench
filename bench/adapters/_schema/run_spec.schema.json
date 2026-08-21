@@ -10,8 +10,8 @@
     "budget": {
       "type": "object",
       "properties": {
-        "tool_calls": { "type": ["integer", "null"] },
         "usd": { "type": ["number", "null"] },
+        "tokens": { "type": ["integer", "null"] },
         "wall_time_s": { "type": ["integer", "null"] }
       }
     },

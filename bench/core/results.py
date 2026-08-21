@@ -76,7 +76,8 @@ def make_row(*, arm: str, scenario: str, repeat: int, model: str | None,
              status: str, coverage: dict[str, Any], efficiency: dict[str, Any],
              derived: dict[str, Any], workdir: str,
              mode: str = "autonomous", iterations: int = 1,
-             curve: dict[str, Any] | None = None) -> dict[str, Any]:
+             curve: dict[str, Any] | None = None,
+             stop_reason: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "arm": arm,
@@ -86,12 +87,27 @@ def make_row(*, arm: str, scenario: str, repeat: int, model: str | None,
         "mode": mode,
         "iterations": iterations,
         "status": status,
+        # Why the run stopped: {"code": ..., "detail": ...}. `status` is the coarse
+        # terminal state; stop_reason distinguishes e.g. plateau vs max-iterations
+        # vs which configured limit was hit — none of which `status` can express.
+        "stop_reason": stop_reason or {},
         "coverage": coverage,
         "curve": curve or {},
         "efficiency": efficiency,
         "derived": derived,
         "workdir": workdir,
     }
+
+
+# Coarse status -> stop code, for rows written before stop_reason existed.
+_STATUS_FALLBACK = {"completed": "agent_completed",
+                    "budget_exceeded": "budget", "error": "error"}
+
+
+def stop_code(row: dict[str, Any]) -> str:
+    """The stop-reason code for a row, inferring from `status` for older rows."""
+    code = (row.get("stop_reason") or {}).get("code")
+    return code or _STATUS_FALLBACK.get(row.get("status"), "unknown")
 
 
 def write_row(row: dict[str, Any], path: Path) -> None:
@@ -146,6 +162,14 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
             at[fk] = round(statistics.fmean(ratios), 4)
     if at:
         out["coverage_at_budget_mean"] = at
+    # Why the repetitions stopped, counted by code across the whole batch, so the
+    # dashboard can show the mix (e.g. 2 plateau, 1 wall-limit) at a glance.
+    stops: dict[str, int] = {}
+    for r in rows:
+        c = stop_code(r)
+        stops[c] = stops.get(c, 0) + 1
+    if stops:
+        out["stop_reasons"] = stops
     return out
 
 

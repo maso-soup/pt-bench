@@ -8,11 +8,11 @@
   :root{
     --bg:#f7f8fa; --panel:#ffffff; --ink:#1a1d21; --muted:#697079;
     --line:#e6e8ec; --accent:#4f46e5; --a:#4f46e5; --b:#e07b16;
-    --good:#16a34a; --chip:#eef0f4; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.04);
+    --good:#16a34a; --bad:#dc2626; --chip:#eef0f4; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.04);
   }
   @media (prefers-color-scheme:dark){
     :root{ --bg:#0e1013; --panel:#16191e; --ink:#e8eaed; --muted:#9aa2ad;
-      --line:#262b32; --accent:#7c78f0; --a:#7c78f0; --b:#f0a24a; --good:#4ade80;
+      --line:#262b32; --accent:#7c78f0; --a:#7c78f0; --b:#f0a24a; --good:#4ade80; --bad:#f87171;
       --chip:#20242b; --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);}
   }
   *{box-sizing:border-box}
@@ -52,6 +52,20 @@
   .metric .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
   .metric .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px}
   .metric .v small{font-size:12px;font-weight:500;color:var(--muted)}
+  .metric.wide{grid-column:1/-1;border-color:var(--accent)}
+  .metric.wide .k{color:var(--accent)}
+  .metric .sub{font-size:11px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+  .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+  .toolbar .tb-k{font-size:12px;font-weight:600;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.04em}
+  .toolbar .tb-note{font-size:12px;color:var(--muted)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;
+    overflow:hidden;background:var(--panel)}
+  .seg button{border:0;background:transparent;color:var(--muted);padding:7px 15px;
+    font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .bars{display:flex;flex-direction:column;gap:7px}
   .bar{display:grid;grid-template-columns:120px 1fr auto;gap:10px;align-items:center;font-size:12px}
   .bar .lbl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -62,6 +76,14 @@
   .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px}
   .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
   .empty{color:var(--muted);text-align:center;padding:40px 0}
+  .stops{display:flex;flex-wrap:wrap;gap:6px}
+  .stop{border:1px solid var(--line);background:var(--chip);color:var(--ink);
+    border-radius:999px;padding:3px 10px;font-size:12px}
+  .stop b{font-weight:700}
+  .stop.good{border-color:var(--good);color:var(--good)}
+  .stop.limit{border-color:var(--b);color:var(--b)}
+  .stop.bad{border-color:var(--bad);color:var(--bad)}
+  .stop.neutral{color:var(--muted)}
   svg{display:block;width:100%;height:auto}
   .axis{stroke:var(--line)} .grid{stroke:var(--line);stroke-dasharray:2 4}
   .tick{fill:var(--muted);font-size:10px}
@@ -88,6 +110,16 @@
     </div>
   </div>
 
+  <div class="toolbar">
+    <span class="tb-k">Findings per</span>
+    <div class="seg" id="denom" role="group" aria-label="Findings-per denominator">
+      <button type="button" data-d="time" aria-pressed="true">Time</button>
+      <button type="button" data-d="tokens" aria-pressed="false">Tokens</button>
+      <button type="button" data-d="usd" aria-pressed="false">USD</button>
+    </div>
+    <span class="tb-note" id="denomNote"></span>
+  </div>
+
   <div class="cols">
     <div id="colA"></div>
     <div id="colB"></div>
@@ -99,6 +131,29 @@ const $ = s => document.querySelector(s);
 const pct = x => x==null ? "–" : (x*100).toFixed(1)+"%";
 const num = (x,d=0) => x==null ? "–" : Number(x).toFixed(d);
 const short = s => s ? s.slice(0,7) : "–";
+const fmtDur = s => {
+  if(s==null) return "–";
+  s = Math.round(s);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+};
+const fmtTok = t => t==null ? "–"
+  : t>=1e6 ? (t/1e6).toFixed(2)+"M" : t>=1e3 ? (t/1e3).toFixed(1)+"k" : String(t);
+const fmtUsd = x => x==null ? "–" : "$" + (x<1 ? Number(x).toFixed(3) : Number(x).toFixed(2));
+const fmtRate = x => (x==null || !isFinite(x)) ? "–"
+  : x>=100 ? x.toFixed(0) : x>=10 ? x.toFixed(1) : x.toFixed(2);
+
+// Denominators for findings-per-X. den() returns null when the run carries no
+// data for that resource, so the tile degrades to "–" instead of dividing by 0.
+const DENOMS = {
+  time:   {k:"Findings / hour", note:"solved objectives per hour of wall-clock time",
+           den:t=>t.wall==null?null:t.wall/3600, denText:t=>fmtDur(t.wall)},
+  tokens: {k:"Findings / 1M tokens", note:"solved objectives per million tokens (in + out)",
+           den:t=>t.tokens==null?null:t.tokens/1e6, denText:t=>fmtTok(t.tokens)+" tokens"},
+  usd:    {k:"Findings / $", note:"solved objectives per US dollar spent",
+           den:t=>t.cost==null?null:t.cost, denText:t=>fmtUsd(t.cost)},
+};
+let DENOM = "time";
 
 async function jget(u){ const r = await fetch(u); if(!r.ok) throw new Error(u); return r.json(); }
 
@@ -119,6 +174,9 @@ async function boot(){
   if(RUNS[0]) $("#selA").value = RUNS[0].id;
   if(RUNS[1]) $("#selB").value = RUNS[1].id;
   $("#selA").onchange = refresh; $("#selB").onchange = refresh;
+  for(const btn of document.querySelectorAll("#denom button")){
+    btn.onclick = () => { DENOM = btn.dataset.d; renderCards(); };
+  }
   refresh();
 }
 
@@ -145,9 +203,16 @@ async function refresh(){
   const ida = $("#selA").value, idb = $("#selB").value;
   DETAIL.A = ida ? await jget("/api/runs/"+ida) : null;
   DETAIL.B = idb ? await jget("/api/runs/"+idb) : null;
+  renderCards();
+  renderOverlay();
+}
+
+function renderCards(){
+  for(const btn of document.querySelectorAll("#denom button"))
+    btn.setAttribute("aria-pressed", String(btn.dataset.d === DENOM));
+  $("#denomNote").textContent = DENOMS[DENOM].note;
   $("#colA").innerHTML = DETAIL.A ? renderCard(DETAIL.A,"a") : emptyCard();
   $("#colB").innerHTML = DETAIL.B ? renderCard(DETAIL.B,"b") : emptyCard();
-  renderOverlay();
 }
 
 function emptyCard(){ return `<div class="card"><div class="empty">No run selected.</div></div>`; }
@@ -167,6 +232,24 @@ function aggBy(rows, key){
   }));
 }
 
+// Batch totals over completed repetitions only, so the findings-per-X numerator
+// and denominator cover the same runs (the badges show completed / total).
+// A resource stays null unless at least one repetition reported it.
+function totals(rows){
+  const ok = rows.filter(r => r.status === "completed");
+  const t = {n:ok.length, n_rows:rows.length, solved:0,
+             tokens_in:null, tokens_out:null, tokens:null, cost:null, wall:null};
+  const add = (k,v) => { if(v!=null) t[k] = (t[k]||0) + v; };
+  for(const r of ok){
+    t.solved += (r.coverage||{}).solved || 0;
+    const e = r.efficiency || {};
+    add("tokens_in", e.tokens_in); add("tokens_out", e.tokens_out);
+    add("cost", e.cost_usd);       add("wall", e.wall_time_s);
+  }
+  if(t.tokens_in!=null || t.tokens_out!=null) t.tokens = (t.tokens_in||0) + (t.tokens_out||0);
+  return t;
+}
+
 function bars(items, color, sortByTotal){
   if(!items.length) return `<div class="empty">no data</div>`;
   items.sort((a,b)=> sortByTotal ? b.total-a.total : (a.label.localeCompare(b.label,undefined,{numeric:true})));
@@ -178,7 +261,60 @@ function bars(items, color, sortByTotal){
     </div>`).join("") + `</div>`;
 }
 
-function metric(k,v){ return `<div class="metric"><div class="k">${k}</div><div class="v">${v}</div></div>`; }
+function metric(k,v,opts={}){
+  return `<div class="metric${opts.cls?" "+opts.cls:""}"><div class="k">${k}</div>` +
+    `<div class="v">${v}</div>${opts.sub?`<div class="sub">${opts.sub}</div>`:""}</div>`;
+}
+
+// The findings-per-X tile for one run, under the currently selected denominator.
+function perTile(t){
+  const D = DENOMS[DENOM], den = D.den(t);
+  const rate = (den!=null && den>0) ? t.solved/den : null;
+  const scope = t.n===t.n_rows ? "" : ` · ${t.n}/${t.n_rows} completed runs`;
+  const sub = den==null ? "no data for this denominator"
+    : `${t.solved} findings / ${D.denText(t)}${scope}`;
+  return metric(D.k, fmtRate(rate), {cls:"wide", sub});
+}
+
+// Human labels + colour tone per stop-reason code (see cli._classify_stop).
+const STOP_META = {
+  agent_completed:{label:"Agent finished", tone:"good"},
+  all_solved:     {label:"All findings solved", tone:"good"},
+  plateau:        {label:"Plateau — no new solves", tone:"neutral"},
+  max_iterations: {label:"Max iterations", tone:"neutral"},
+  budget_wall:    {label:"Wall-time limit", tone:"limit"},
+  budget_tokens:  {label:"Token limit", tone:"limit"},
+  budget_usd:     {label:"USD limit", tone:"limit"},
+  budget:         {label:"Budget limit", tone:"limit"},
+  error:          {label:"Error", tone:"bad"},
+  unknown:        {label:"Unknown", tone:"neutral"},
+};
+const STATUS_FALLBACK = {completed:"agent_completed", budget_exceeded:"budget", error:"error"};
+
+// Stop-reason histogram for a run: prefer the aggregated summary, fall back to
+// the per-repetition rows (older summaries predate stop_reasons).
+function stopReasons(detail){
+  const s = detail.summary||{};
+  if(s.stop_reasons && Object.keys(s.stop_reasons).length) return s.stop_reasons;
+  const acc = {};
+  for(const r of (detail.rows||[])){
+    const c = (r.stop_reason&&r.stop_reason.code) || STATUS_FALLBACK[r.status] || "unknown";
+    acc[c] = (acc[c]||0) + 1;
+  }
+  return acc;
+}
+
+function stopChips(detail){
+  const counts = stopReasons(detail);
+  const codes = Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
+  if(!codes.length) return `<div class="empty">no data</div>`;
+  const total = codes.reduce((n,c)=>n+counts[c],0);
+  return `<div class="stops">` + codes.map(c=>{
+    const m = STOP_META[c] || {label:c, tone:"neutral"};
+    const cnt = total>1 ? ` <b>×${counts[c]}</b>` : "";
+    return `<span class="stop ${m.tone}" title="${m.label}">${m.label}${cnt}</span>`;
+  }).join("") + `</div>`;
+}
 
 function renderCard(detail, color){
   const m = detail.manifest||{}, s = detail.summary||{}, rows = detail.rows||[];
@@ -191,6 +327,7 @@ function renderCard(detail, color){
       pt-bench <code>${short(pb.sha)}</code>${pb.dirty?'<span class="dirty"> ✎</span>':''}${
       ar.sha?` · agent <code>${short(ar.sha)}</code>${ar.dirty?'<span class="dirty"> ✎</span>':''}`:''}
     </span>`;
+  const t = totals(rows);
   return `<div class="card">
     <div class="card-head">
       <h2>${m.arm||"?"}</h2>
@@ -208,9 +345,15 @@ function renderCard(detail, color){
       ${metric("Weighted", pct(s.coverage_weighted_mean))}
       ${metric("Iterations", num(s.iterations_mean,1))}
       ${metric("First solve", s.first_solve_s_mean!=null?num(s.first_solve_s_mean,0)+"s":"–")}
-      ${metric("Cost", s.cost_usd_mean!=null?"$"+num(s.cost_usd_mean,2):"–")}
+      ${metric("Cost / run", s.cost_usd_mean!=null?"$"+num(s.cost_usd_mean,2):"–")}
       ${metric("Tool calls", num(s.tool_calls_mean,0))}
+      ${metric("Total time", fmtDur(t.wall))}
+      ${metric("Total tokens", fmtTok(t.tokens),
+               {sub: t.tokens==null?"" : `${fmtTok(t.tokens_in)} in · ${fmtTok(t.tokens_out)} out`})}
+      ${metric("Total cost", fmtUsd(t.cost))}
+      ${perTile(t)}
     </div>
+    <div class="section"><h3>Why it stopped</h3>${stopChips(detail)}</div>
     <div class="section"><h3>Coverage at budget</h3>${lineChart([series(cab,color)], color)}</div>
     <div class="section"><h3>By category</h3>${bars(aggBy(rows,"by_category"), color, true)}</div>
     <div class="section"><h3>By difficulty</h3>${bars(aggBy(rows,"by_difficulty"), color, false)}</div>

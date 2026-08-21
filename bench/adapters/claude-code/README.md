@@ -81,6 +81,15 @@ just controls the environment so that feature has nothing stale to resume from.
 
 ## Budget
 
-`budget.wall_time_s` is enforced by the adapter (it kills the run when exceeded)
-and again by the runner as a backstop. `tool_calls` and `usd` are advisory in v1
-— passed into the task prompt but not hard-enforced.
+`budget.wall_time_s`, `budget.usd`, and `budget.tokens` are all hard limits: the
+adapter tracks the streamed usage and kills the run when any is exceeded, writing
+`status: budget_exceeded`. The runner also enforces `wall_time_s` as a subprocess
+backstop and totals every cap across max-coverage continuation iterations.
+
+USD can only preempt mid-run if the model is priceable — the CLI's authoritative
+`total_cost_usd` arrives only in the terminal `result` event, so the adapter
+derives a running cost estimate from token usage using a built-in price table
+(override per-arm via `adapter_config.prices`: `input_per_mtok`, `output_per_mtok`,
+optional `cache_write_per_mtok` / `cache_read_per_mtok`). For a model with no known
+price, USD is enforced post-hoc from the final cost, while `tokens` and
+`wall_time_s` still bound the run.
