@@ -128,22 +128,31 @@ def _ci95(values: list[float]) -> tuple[float, float]:
 
 
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate rows for a single (arm, scenario) cell across repetitions."""
-    ok = [r for r in rows if r.get("status") == "completed"]
-    cov = [r["coverage"]["coverage"] for r in ok]
-    covw = [r["coverage"]["coverage_weighted"] for r in ok]
-    cost = [r["efficiency"]["cost_usd"] for r in ok if r["efficiency"].get("cost_usd") is not None]
-    calls = [r["efficiency"]["tool_calls"] for r in ok if r["efficiency"].get("tool_calls") is not None]
+    """Aggregate rows for a single (arm, scenario) cell across repetitions.
+
+    Headline metrics are averaged over *gradable* runs — those that ran the agent
+    and read the oracle, which includes runs stopped by a budget limit or a safety
+    refusal (they still produced real coverage and usage). Only a hard `error`
+    (setup/crash) has nothing to grade. This is why a budget-stopped cell must not
+    come out all-blank: the coverage it achieved is a real result."""
+    graded = [r for r in rows
+              if r.get("status") in ("completed", "budget_exceeded", "refused")]
+    n_completed = sum(1 for r in rows if r.get("status") == "completed")
+    cov = [r["coverage"]["coverage"] for r in graded]
+    covw = [r["coverage"]["coverage_weighted"] for r in graded]
+    cost = [r["efficiency"]["cost_usd"] for r in graded if r["efficiency"].get("cost_usd") is not None]
+    calls = [r["efficiency"]["tool_calls"] for r in graded if r["efficiency"].get("tool_calls") is not None]
 
     cov_m, cov_h = _ci95(cov)
     covw_m, covw_h = _ci95(covw)
-    iters = [r.get("iterations", 1) for r in ok]
-    firsts = [r["curve"]["first_solve_s"] for r in ok
+    iters = [r.get("iterations", 1) for r in graded]
+    firsts = [r["curve"]["first_solve_s"] for r in graded
               if r.get("curve", {}).get("first_solve_s") is not None]
     out = {
-        "mode": (ok[0].get("mode") if ok else None),
+        "mode": (graded[0].get("mode") if graded else None),
         "n_runs": len(rows),
-        "n_completed": len(ok),
+        "n_completed": n_completed,
+        "n_graded": len(graded),
         "iterations_mean": round(statistics.fmean(iters), 2) if iters else None,
         "coverage_mean": round(cov_m, 4),
         "coverage_ci95_halfwidth": round(cov_h, 4),
@@ -154,10 +163,10 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "tool_calls_mean": round(statistics.fmean(calls), 2) if calls else None,
     }
     # Mean coverage reached by each fraction of the wall budget (coverage-at-budget).
-    frac_keys = sorted({k for r in ok for k in r.get("curve", {}).get("at", {})})
+    frac_keys = sorted({k for r in graded for k in r.get("curve", {}).get("at", {})})
     at = {}
     for fk in frac_keys:
-        ratios = [r["curve"]["at"][fk]["ratio"] for r in ok if fk in r.get("curve", {}).get("at", {})]
+        ratios = [r["curve"]["at"][fk]["ratio"] for r in graded if fk in r.get("curve", {}).get("at", {})]
         if ratios:
             at[fk] = round(statistics.fmean(ratios), 4)
     if at:

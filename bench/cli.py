@@ -22,7 +22,7 @@ import yaml
 
 from bench.core import adapter as adapter_mod
 from bench.core import grader, progress, registry, resources, results
-from bench.core.scenario import Budget
+from bench.core.scenario import Budget, OracleResult
 
 TIMEOUT_GRACE_S = 120  # runner backstop beyond the adapter's own wall limit
 MAX_CONTINUATION_ITERS = 10  # safety cap on max-coverage re-invocations
@@ -306,7 +306,13 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
 
             oracle = scenario.oracle(handle)
             usage, tool_calls = adapter_mod.read_artifacts_multi(iter_dirs)
-            cov = grader.coverage(gt, oracle)
+            # Coverage is the UNION of everything solved during the run (the live
+            # poller's history) with the final oracle read — so a target that
+            # transiently drops solved-state between max-coverage iterations (e.g.
+            # the app restarting and re-seeding) can't erase earlier progress. The
+            # final read alone would report only what happens to be solved right now.
+            solved_union = set(oracle.solved) | poller.solved_keys
+            cov = grader.coverage(gt, OracleResult(solved=solved_union))
             eff = grader.efficiency(usage, tool_calls)
             derived = grader.cost_per_solved(cov, eff)
             cab = grader.coverage_at_budget(poller.curve, cov["total"], budget.wall_time_s)

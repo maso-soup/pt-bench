@@ -233,11 +233,13 @@ function aggBy(rows, key){
   }));
 }
 
-// Batch totals over completed repetitions only, so the findings-per-X numerator
-// and denominator cover the same runs (the badges show completed / total).
-// A resource stays null unless at least one repetition reported it.
+// Batch totals over GRADABLE repetitions — completed, or stopped by a budget
+// limit / safety refusal (they still ran the agent and spent real resources), so
+// the findings-per-X numerator and denominator cover the same runs. Only hard
+// errors are dropped. A resource stays null unless at least one run reported it.
+const GRADABLE = new Set(["completed", "budget_exceeded", "refused"]);
 function totals(rows){
-  const ok = rows.filter(r => r.status === "completed");
+  const ok = rows.filter(r => GRADABLE.has(r.status));
   const t = {n:ok.length, n_rows:rows.length, solved:0,
              tokens_in:null, tokens_out:null, tokens:null, cost:null, wall:null};
   const add = (k,v) => { if(v!=null) t[k] = (t[k]||0) + v; };
@@ -339,7 +341,7 @@ function renderCard(detail, color){
       <span class="chip mode">${m.mode||""}</span>
       <span class="chip">${m.scenario||""}</span>
       ${m.model?`<span class="chip">${m.model}</span>`:""}
-      <span class="chip">${s.n_completed??0}/${s.n_runs??0} runs</span>
+      <span class="chip" title="runs with a gradable result (completed, or stopped by a budget/refusal) / total repetitions">${(s.n_graded ?? s.n_completed)??0}/${s.n_runs??0} runs</span>
     </div>
     ${prov}
     <div class="metrics">

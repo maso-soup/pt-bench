@@ -47,16 +47,26 @@ class ProgressReporter:
 
     def update(self, result: OracleResult) -> list[str]:
         """Register an oracle sample: print any newly solved items, refresh the
-        counter, and return the newly solved keys (stable order)."""
+        counter, and return the newly solved keys (stable order).
+
+        Solved-tracking is a monotonic UNION over the run: once an item is seen
+        solved it stays counted even if a later oracle sample reports it unsolved.
+        A target that transiently drops solved-state — e.g. a max-coverage
+        continuation where the app restarts and re-seeds between iterations —
+        must not erase progress the agent already demonstrated."""
         solved_now = {k for k in result.solved if k in self._by_key}
         new_keys = sorted(solved_now - self._seen)
         with self._lock:
             for k in new_keys:
                 self._seen.add(k)  # add before printing so the count increments per line
                 self._print_solved(k)
-            self._seen = solved_now  # exact resync (harmless when already equal)
             self._refresh_counter()
         return new_keys
+
+    @property
+    def solved_keys(self) -> set[str]:
+        """The union of every item ever seen solved during the run."""
+        return set(self._seen)
 
     def finish(self) -> None:
         """Move the cursor off the in-place counter line at the end of a run."""
@@ -140,6 +150,11 @@ class ProgressPoller:
     @property
     def solved(self) -> int:
         return self._reporter.solved
+
+    @property
+    def solved_keys(self) -> set[str]:
+        """Union of every item seen solved across the whole run (all iterations)."""
+        return self._reporter.solved_keys
 
     def summary(self) -> dict:
         return {
