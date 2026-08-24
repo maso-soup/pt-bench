@@ -219,3 +219,77 @@ def test_aggregate_counts_stop_reasons():
 def test_make_row_includes_stop_reason():
     r = _row("completed", "all_solved")
     assert r["stop_reason"] == {"code": "all_solved"}
+
+
+# ---- Safety refusal detection ----
+
+def test_refusal_detail_from_assistant_message():
+    ev = {"type": "assistant", "message": {"stop_reason": "refusal",
+          "stop_details": {"type": "refusal", "category": "cyber",
+                           "explanation": "declined"}, "content": []}}
+    r = cc._refusal_detail(ev)
+    assert r == {"category": "cyber", "explanation": "declined"}
+
+
+def test_refusal_detail_from_result_event():
+    ev = {"type": "result", "stop_reason": "refusal",
+          "stop_details": {"category": "cyber"}}
+    assert cc._refusal_detail(ev)["category"] == "cyber"
+
+
+def test_refusal_detail_tolerates_subtype_and_missing_details():
+    assert cc._refusal_detail({"type": "result", "subtype": "refusal_stop"}) == {
+        "category": None, "explanation": None}
+    assert cc._refusal_detail({"type": "assistant",
+                               "message": {"stop_reason": "end_turn"}}) is None
+    assert cc._refusal_detail({"type": "assistant", "message": {"content": []}}) is None
+
+
+def test_classify_stop_refused():
+    d = cli._classify_stop({"status": "refused", "reason": "model refusal (category: cyber)"})
+    assert d["code"] == "refused" and "cyber" in d["detail"]
+
+
+def test_stop_code_refused_fallback():
+    assert results_mod.stop_code({"status": "refused"}) == "refused"
+    assert results_mod.stop_code({"stop_reason": {"code": "refused"}}) == "refused"
+
+
+# ---- End-to-end: adapter promotes a streamed refusal to status "refused" ----
+
+import json as _json
+import os as _os
+import subprocess as _sp
+import sys as _sys
+
+
+def test_adapter_records_refusal_end_to_end(tmp_path):
+    """Drive the real adapter with a fake `claude` that emits a refusal turn and
+    confirm status.json becomes 'refused' (not 'completed'), with the category,
+    while tool calls and usage are still captured."""
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    (fakebin / "claude").write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "print(json.dumps({'type':'assistant','message':{'usage':{'input_tokens':200,"
+        "'output_tokens':50},'content':[{'type':'tool_use','name':'Bash','input':{}}]}}),flush=True)\n"
+        "print(json.dumps({'type':'assistant','message':{'stop_reason':'refusal',"
+        "'stop_details':{'category':'cyber','explanation':'declined'},'content':[]}}),flush=True)\n"
+        "print(json.dumps({'type':'result','total_cost_usd':0.01,'usage':{}}),flush=True)\n")
+    (fakebin / "claude").chmod(0o755)
+
+    repo = tmp_path / "repo"; repo.mkdir()
+    wd = tmp_path / "wd"; wd.mkdir()
+    (wd / "run_spec.json").write_text(_json.dumps({
+        "target_url": "http://t", "scope": "s", "model": "claude-opus-4-8",
+        "budget": {"wall_time_s": 600}, "workdir": str(wd), "extra": {"repo": str(repo)}}))
+
+    env = dict(_os.environ, PATH=f"{fakebin}{_os.pathsep}{_os.environ['PATH']}")
+    _sp.run([_sys.executable, str(CC), "--spec", str(wd / "run_spec.json")],
+            check=True, env=env, timeout=60)
+
+    status = _json.loads((wd / "status.json").read_text())
+    assert status["status"] == "refused" and status["category"] == "cyber"
+    assert (wd / "tool_calls.jsonl").read_text().strip()          # tools still recorded
+    assert _json.loads((wd / "usage.json").read_text())["cost_usd"] == 0.01

@@ -4,8 +4,9 @@
   "type": "object",
   "required": ["status"],
   "properties": {
-    "status": { "enum": ["completed", "budget_exceeded", "error"] },
+    "status": { "enum": ["completed", "budget_exceeded", "refused", "error"] },
     "reason": { "type": "string" },
+    "category": { "type": "string" },
     "wall_time_s": { "type": "number" }
   }
 }

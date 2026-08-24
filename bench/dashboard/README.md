@@ -37,8 +37,9 @@ so it shows whatever you've already run.
 - **Why it stopped** — a per-run breakdown of how the repetitions ended, counted
   by reason: the agent finishing on its own, solving everything, plateauing (no
   new solves), hitting the max-iteration cap, hitting a configured limit (wall
-  time / tokens / USD), or erroring. Colour-coded, with a `×n` count when a batch
-  mixed reasons across repetitions.
+  time / tokens / USD), being declined by a safety safeguard (**Safety refusal**),
+  or erroring. Colour-coded, with a `×n` count when a batch mixed reasons across
+  repetitions.
 - Provenance (git SHA of pt-bench and the agent repo, dirty flag) from each run's
   `manifest.json`, so a comparison is anchored to the code that produced it.
 - **Delete** a run from either card (with a confirm prompt) — removes its batch dir

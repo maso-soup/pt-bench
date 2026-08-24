@@ -93,3 +93,13 @@ derives a running cost estimate from token usage using a built-in price table
 optional `cache_write_per_mtok` / `cache_read_per_mtok`). For a model with no known
 price, USD is enforced post-hoc from the final cost, while `tokens` and
 `wall_time_s` still bound the run.
+
+## Safety refusals
+
+If a safeguard declines a turn (the API's `stop_reason: "refusal"`, e.g. category
+`cyber`), the `claude` run ends but streams like a normal completion — so without
+handling it the run would be recorded as `completed`, indistinguishable from the
+agent finishing on its own. The adapter watches the stream for a refusal and
+promotes the terminal status to `refused` (with the refusal `category`), so
+results record why the run stopped. In max-coverage mode the runner treats
+`refused` as terminal and does not re-invoke the agent back into the same refusal.

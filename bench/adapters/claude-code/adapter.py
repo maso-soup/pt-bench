@@ -193,6 +193,7 @@ def main() -> None:
     raw = (workdir / "transcript.jsonl").open("w")
     tools = (workdir / "tool_calls.jsonl").open("w")
     status = {"status": "completed", "reason": ""}
+    refusal = None  # last safety refusal seen in the stream, if any
     started = time.time()
 
     try:
@@ -204,6 +205,9 @@ def main() -> None:
             if ev is not None:
                 _record_tools(ev, tools)
                 tracker.ingest(ev)
+                r = _refusal_detail(ev)
+                if r is not None:
+                    refusal = r
             hit = tracker.breach(time.time() - started)
             if hit:
                 proc.kill()
@@ -227,6 +231,18 @@ def main() -> None:
         if tracker.max_usd and c is not None and c > tracker.max_usd:
             status = {"status": "budget_exceeded",
                       "reason": f"USD budget exceeded (${c:.4g} > ${tracker.max_usd:.4g})"}
+
+    # A safety refusal (e.g. Anthropic's cyber safeguards declining a turn) ends
+    # the run but arrives as a normal stream, so the default status would be
+    # "completed" — indistinguishable from the agent finishing on its own. Promote
+    # it to a distinct terminal status carrying the refusal category, so results
+    # record WHY the run stopped and max-coverage won't re-invoke straight back
+    # into it. Budget/error take precedence (only override a plain completion).
+    if status["status"] == "completed" and refusal is not None:
+        cat = refusal.get("category") or "unspecified"
+        expl = refusal.get("explanation") or ""
+        reason = f"model refusal (category: {cat})" + (f": {expl}" if expl else "")
+        status = {"status": "refused", "reason": reason, "category": cat}
 
     (workdir / "usage.json").write_text(
         json.dumps(tracker.usage_dict(time.time() - started), indent=2))
@@ -252,6 +268,25 @@ def _record_tools(ev: dict, tools) -> None:
                 "ts": time.time(), "tool": block.get("name"),
                 "args": block.get("input", {}),
             }) + "\n")
+
+
+def _refusal_detail(ev: dict) -> dict | None:
+    """A safety refusal, if this event is one. Reads the API-authoritative shape
+    (`stop_reason: "refusal"` + `stop_details.category`, e.g. "cyber") on either
+    the assistant message or the terminal result event, and tolerates a result
+    `subtype` naming a refusal. Returns {category, explanation} or None."""
+    msg = ev.get("message") if isinstance(ev.get("message"), dict) else {}
+    stop_reason = ev.get("stop_reason") or msg.get("stop_reason")
+    details = ev.get("stop_details") or msg.get("stop_details") or {}
+    subtype = ev.get("subtype")
+    is_refusal = (stop_reason == "refusal"
+                  or (isinstance(subtype, str) and "refus" in subtype.lower()))
+    if not is_refusal:
+        return None
+    if not isinstance(details, dict):
+        details = {}
+    return {"category": details.get("category"),
+            "explanation": details.get("explanation")}
 
 
 def _fail(workdir: Path, reason: str) -> None:

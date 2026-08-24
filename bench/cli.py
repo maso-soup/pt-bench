@@ -126,6 +126,8 @@ def _classify_stop(status: dict) -> dict:
     reason = status.get("reason", "") or ""
     if st == "completed":
         return {"code": "agent_completed", "detail": "agent stopped on its own"}
+    if st == "refused":
+        return {"code": "refused", "detail": reason or "safety refusal"}
     if st == "error":
         return {"code": "error", "detail": reason}
     if st == "budget_exceeded":
@@ -208,9 +210,9 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
             stop = _classify_stop(status)
             hit_max = False
             break
-        # max-coverage: the adapter erroring or hitting a hard limit ends the cell;
-        # continuing would just re-hit it.
-        if status.get("status") in ("error", "budget_exceeded"):
+        # max-coverage: the adapter erroring, hitting a hard limit, or being
+        # refused by safety ends the cell — continuing would just re-hit it.
+        if status.get("status") in ("error", "budget_exceeded", "refused"):
             stop = _classify_stop(status)
             hit_max = False
             break

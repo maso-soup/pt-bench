@@ -100,7 +100,7 @@ def make_row(*, arm: str, scenario: str, repeat: int, model: str | None,
 
 
 # Coarse status -> stop code, for rows written before stop_reason existed.
-_STATUS_FALLBACK = {"completed": "agent_completed",
+_STATUS_FALLBACK = {"completed": "agent_completed", "refused": "refused",
                     "budget_exceeded": "budget", "error": "error"}
 
 

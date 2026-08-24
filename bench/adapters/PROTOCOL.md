@@ -59,8 +59,10 @@ working directory is arbitrary; all paths it needs are inside the spec.
 ```json
 { "status": "completed", "reason": "" }
 ```
-`status` ∈ `completed` | `budget_exceeded` | `error`. If the adapter writes no
-`status.json`, the runner records `error`.
+`status` ∈ `completed` | `budget_exceeded` | `refused` | `error`. Use `refused`
+when a safety safeguard declines the run (the API's `stop_reason: "refusal"`);
+add a `category` field (e.g. `"cyber"`) when the refusal carries one. If the
+adapter writes no `status.json`, the runner records `error`.
 
 ### `usage.json`
 ```json
