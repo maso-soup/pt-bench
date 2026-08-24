@@ -70,11 +70,24 @@ def find_arm(name: str, cli_arg: str | None = None) -> Path | None:
     return None
 
 
-def baseline_dir(name: str) -> Path:
+def baselines_root() -> Path:
+    """Parent of the materialized per-user baseline dirs."""
+    return data_dir() / "baselines"
+
+
+def baseline_dir(name: str, *, refresh: bool = False) -> Path:
     """A WRITABLE per-user baseline dir the agent can use as its cwd (Claude Code
     writes there), materialized from the packaged template on first use. The
-    package copy is read-only in a real install, so it can't be the cwd directly."""
-    dest = data_dir() / "baselines" / name
+    package copy is read-only in a real install, so it can't be the cwd directly.
+
+    With refresh=True the dir is first reset to the pristine template, giving each
+    repetition a clean cwd. Do this instead of listing the dir in an arm's
+    reset_paths: reset_agent_state MOVES a path to trash, which would delete the
+    very cwd the adapter needs and fail the run with "extra.repo is not a
+    directory"."""
+    dest = baselines_root() / name
+    if refresh and dest.exists():
+        shutil.rmtree(dest)
     if not dest.exists():
         dest.mkdir(parents=True, exist_ok=True)
         tmpl = package_root() / "baselines" / name

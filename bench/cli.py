@@ -54,6 +54,17 @@ def resolve_repo(value: str) -> str:
     return str(p if p.is_absolute() else (Path.cwd() / p))
 
 
+def _is_baseline_repo(repo: str | None) -> bool:
+    """True if `repo` is a materialized per-user baseline dir (see
+    resources.baseline_dir), i.e. it lives directly under the baselines root."""
+    if not repo:
+        return False
+    try:
+        return Path(repo).resolve().parent == resources.baselines_root().resolve()
+    except OSError:
+        return False
+
+
 def load_arm(name: str, arms_dir: str | None = None) -> dict:
     path = resources.find_arm(name, arms_dir)
     if path is None:
@@ -271,6 +282,14 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
             reset_paths = (arm.get("adapter_config") or {}).get("reset_paths") or []
             for src, dest in adapter_mod.reset_agent_state(reset_paths=reset_paths):
                 print(f"  reset: {src} -> trash ({dest.parent.name})")
+
+            # A baseline arm's cwd IS a managed baseline dir — reset it to the
+            # pristine template here rather than via reset_paths (which would move
+            # the cwd to trash and break the run). Gives each repetition a clean cwd.
+            repo = (arm.get("adapter_config") or {}).get("repo")
+            if _is_baseline_repo(repo):
+                resources.baseline_dir(Path(repo).name, refresh=True)
+                print(f"  baseline cwd reset to template: {repo}")
 
             interval = (progress_interval if progress_interval is not None
                         else getattr(scenario, "progress_interval_s", 5.0))
