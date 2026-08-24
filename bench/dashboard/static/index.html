@@ -253,6 +253,33 @@ function totals(rows){
   return t;
 }
 
+// Headline metrics derived from the per-repetition rows — a fallback so the card
+// stays populated when summary.json is missing or stale (rows are always written
+// per repetition and already drive the totals above). Gradable rows only; the
+// real summary.json overrides these when present.
+function rowMetrics(rows){
+  const g = rows.filter(r => GRADABLE.has(r.status));
+  const nn = xs => xs.filter(v => v!=null);
+  const mean = xs => xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : null;
+  const ci95 = xs => { if(xs.length<2) return 0;
+    const m=mean(xs), v=xs.reduce((a,b)=>a+(b-m)**2,0)/(xs.length-1);
+    return 1.96*Math.sqrt(v)/Math.sqrt(xs.length); };
+  const cov   = nn(g.map(r => (r.coverage||{}).coverage));
+  const covw  = nn(g.map(r => (r.coverage||{}).coverage_weighted));
+  const iters = g.map(r => r.iterations ?? 1);
+  const first = nn(g.map(r => (r.curve||{}).first_solve_s));
+  const cost  = nn(g.map(r => (r.efficiency||{}).cost_usd));
+  const calls = nn(g.map(r => (r.efficiency||{}).tool_calls));
+  const out = {n_graded: g.length, n_runs: rows.length};
+  if(cov.length){ out.coverage_mean = mean(cov); out.coverage_ci95_halfwidth = ci95(cov); }
+  if(covw.length) out.coverage_weighted_mean = mean(covw);
+  if(iters.length) out.iterations_mean = mean(iters);
+  if(first.length) out.first_solve_s_mean = mean(first);
+  if(cost.length) out.cost_usd_mean = mean(cost);
+  if(calls.length) out.tool_calls_mean = mean(calls);
+  return out;
+}
+
 function bars(items, color, sortByTotal){
   if(!items.length) return `<div class="empty">no data</div>`;
   items.sort((a,b)=> sortByTotal ? b.total-a.total : (a.label.localeCompare(b.label,undefined,{numeric:true})));
@@ -321,7 +348,10 @@ function stopChips(detail){
 }
 
 function renderCard(detail, color){
-  const m = detail.manifest||{}, s = detail.summary||{}, rows = detail.rows||[];
+  const m = detail.manifest||{}, rows = detail.rows||[];
+  // Prefer the canonical summary.json; fall back to row-derived metrics for any
+  // field it lacks, so a missing/stale summary can't blank the card.
+  const s = Object.assign(rowMetrics(rows), detail.summary||{});
   const g = m.git||{}, pb = g.pt_bench||{}, ar = g.agent_repo||{};
   const ci = s.coverage_ci95_halfwidth;
   const cov = `${pct(s.coverage_mean)} <small>${ci?("± "+(ci*100).toFixed(1)):""}</small>`;
