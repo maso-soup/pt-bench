@@ -1,0 +1,24 @@
+# Baseline control: sonnet-5 with NO pentest scaffolding.
+name: flat-prompt__sonnet-5
+adapter: claude-code
+model: claude-sonnet-5
+adapter_config:
+  # `baselines/<name>` is materialized to a WRITABLE per-user dir the agent uses
+  # as its cwd (~/.local/share/pt-bench/baselines/flat-prompt); the packaged copy
+  # is read-only in a real install. The runner resets this cwd to the pristine
+  # template before every repetition, so do NOT list it in reset_paths — that
+  # would move the cwd to trash and fail the run.
+  repo: baselines/flat-prompt
+  skip_permissions: true       # match the pt-agent arm for a fair unattended run
+  # Clear Claude Code's per-project memory between repetitions so it can't read
+  # back a prior run's notes.
+  reset_paths:
+    - ~/.claude/projects
+budget:
+  # All three caps are hard: the claude-code adapter stops the run when any is hit
+  # (tokens/USD from the streamed usage, wall time in-loop), and the runner enforces
+  # wall time as a subprocess backstop and totals every cap across max-coverage
+  # continuation iterations.
+  usd: 15                      # enforced: stops when cumulative cost exceeds this
+  tokens: 10000000             # enforced: stops when total (input+output) tokens exceed this
+  wall_time_s: 1800            # enforced: adapter in-loop + runner backstop
