@@ -3,4 +3,5 @@ recursive-include bench/baselines *
 recursive-include bench/arms *.yaml
 recursive-include bench/dashboard/static *
 recursive-include bench/scenarios *.yml *.yaml
+recursive-include bench/scenarios *.conf
 global-exclude __pycache__/* *.pyc

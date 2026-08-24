@@ -1,7 +1,10 @@
 # Juice Shop scenario defaults. Override any key from an arm's `scenario_config`.
 # Pin an exact image tag so the challenge set is frozen across runs — never :latest.
 image: "bkimminich/juice-shop:v17.1.1"
-port: 3000
+proxy_image: "nginx:1.27-alpine"   # Tier-2 front door; pin it too for reproducibility
+port: 3000                # AGENT-facing (proxy) port. The app itself has no host
+                          # port; the oracle uses a random loopback port per run.
+node_env: benchshop       # loads the Tier-1 re-branding overlay theme/benchshop.yml
 ready_timeout_s: 180
 progress_interval_s: 5    # how often to poll solved-state for live progress
 # ctf_key: optional fixed HMAC key for reproducible flags; random per-run if unset.

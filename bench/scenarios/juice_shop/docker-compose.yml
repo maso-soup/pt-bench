@@ -1,15 +1,40 @@
-# Juice Shop target for the benchmark. The runner sets JUICE_SHOP_IMAGE,
-# JUICE_SHOP_PORT, CTF_KEY and a unique COMPOSE_PROJECT_NAME per run so that
-# concurrent cells and repetitions never share state.
+# Juice Shop target for the benchmark, fronted by an nginx proxy so the agent
+# sees a re-branded black-box shop while the harness still reads first-party
+# solved-state. The runner sets JUICE_SHOP_IMAGE, PROXY_IMAGE, PUBLIC_PORT,
+# ORACLE_PORT, CTF_KEY, JUICE_SHOP_NODE_ENV and a unique COMPOSE_PROJECT_NAME per
+# run so concurrent cells and repetitions never share state.
 #
-# NODE_ENV=ctf loads the app's bundled CTF configuration; CTF_KEY seeds the
-# deterministic per-challenge flags used as a cross-check on solved-state.
+# NODE_ENV=benchshop loads the Tier-1 re-branding overlay (theme/benchshop.yml,
+# mounted below) on top of the app's default config; it also turns off the
+# built-in hints/mitigations/instructor so the target reads as a normal shop.
+# CTF_KEY still seeds the deterministic per-challenge flags.
 services:
   juice-shop:
     image: ${JUICE_SHOP_IMAGE:-bkimminich/juice-shop:v17.1.1}
     environment:
-      - NODE_ENV=ctf
+      - NODE_ENV=${JUICE_SHOP_NODE_ENV:-benchshop}
       - CTF_KEY=${CTF_KEY:-changeme-benchmark-key}
+    volumes:
+      # Read-only re-branding overlay. `config` (the app's config loader) deep-
+      # merges config/<NODE_ENV>.yml over default.yml.
+      - ./theme/benchshop.yml:/juice-shop/config/benchshop.yml:ro
+    # No host port on purpose: the app is reachable only across the compose
+    # network (via the proxy), so the agent can't bypass the black-box front door
+    # by hitting the app directly.
+    expose:
+      - "3000"
+    restart: "no"
+
+  proxy:
+    image: ${PROXY_IMAGE:-nginx:1.27-alpine}
+    depends_on:
+      - juice-shop
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "${JUICE_SHOP_PORT:-3000}:3000"
+      # Agent-facing: CTF surfaces (answer key / score-board data) are 404'd here.
+      - "${PUBLIC_PORT:-3000}:80"
+      # Oracle-facing: FULL access, bound to loopback on a per-run random port the
+      # agent is never told. The harness reads solved-state through this.
+      - "127.0.0.1:${ORACLE_PORT:-3001}:8081"
     restart: "no"
