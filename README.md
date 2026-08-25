@@ -5,10 +5,12 @@ well an autonomous security agent does against a deliberately-vulnerable target,
 and lets you compare **different agent designs** (hold the model fixed) or
 **different models** (hold the design fixed).
 
-v1 ships one scenario — **OWASP Juice Shop in CTF mode** — and grades three
-dimensions: **coverage**, **exploitation** (both from the target's own solved
-state), and **efficiency** (tool calls, tokens, cost, time). Safety/scope and
-report-quality scoring are deliberately out of scope for v1.
+The flagship scenario — a re-branded **OWASP Juice Shop** run black-box — grades
+three dimensions: **coverage**, **exploitation** (both from the target's own
+solved state), and **efficiency** (tool calls, tokens, cost, time). A second,
+trust-based **HTB** scenario runs an agent against a boot2root machine you supply
+(see [HTB scenario](#htb-scenario-black-box-self-reported) below). Safety/scope
+and report-quality scoring are deliberately out of scope for now.
 
 The design is modular so more environments (AD ranges, cloud accounts, forensics
 images, …) drop in later without touching the runner.
@@ -36,7 +38,7 @@ an agent never changes core code.
 
 ```
 bench/core/            scenario contract, grader, results, resources, adapter invocation
-bench/scenarios/       one dir per environment (juice_shop/ ships in v1)
+bench/scenarios/       one dir per environment (juice_shop/, htb/)
 bench/adapters/        PROTOCOL.md, JSON schemas, one dir per agent wrapper
   example-python/      minimal no-op reference adapter (validates the harness)
   claude-code/         drives any Claude Code repo (e.g. pt-agent) headless
@@ -135,6 +137,37 @@ pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --re
 pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
 ```
 
+## HTB scenario (black-box, self-reported)
+
+The `htb` scenario runs an agent against a boot2root machine **you** stand up and
+manage yourself (a Hack The Box box, a local VM, wherever) — you pass the target
+in by hand. It's a deliberately less-modular counterpart to Juice Shop: there is
+**no first-party oracle**, so the harness cannot confirm a flag on its own.
+Instead it **trusts the agent's self-report** — it grades the `user.txt` /
+`root.txt` values the agent writes to a `flags.json` artifact. Such runs are
+marked `verified: false` in the manifest and badged **self-reported** in the
+dashboard, so they're never confused with Juice Shop's target-verified coverage
+(you can manually confirm them later — see Dashboard below).
+
+```bash
+# start the machine + connect your VPN yourself first, then:
+pt-bench --arm pt-agent__opus-4.8 --scenario htb \
+  --target 10.10.11.42 --machine-name Blazorized --difficulty 4 --repeats 3
+```
+
+- `--target` (required) host/IP, `--machine-name` and `--difficulty` label the run
+  and weight the two flags. Pass any other scenario knob with
+  `--scenario-config KEY=VALUE` (e.g. `reachability_port=22` to fail fast if the
+  box/VPN is down). These merge over the arm's own `scenario_config`.
+- **Black-box by construction:** what the agent sees never reveals the platform,
+  the machine name, or the difficulty — only the target host and a generic
+  full-scope pentest brief. Those labels live only in the manifest, for grading
+  and the dashboard.
+- Use `--mode autonomous` (the default): the run ends when the agent stops itself
+  or a budget cap trips. `--repeats N` re-runs the same machine. The usual
+  time / token / USD budgets from the arm apply unchanged, and the dashboard shows
+  total time / tokens / cost per run.
+
 ## Adding things
 
 - **A new agent** → new dir under `bench/adapters/` satisfying `PROTOCOL.md`, plus
@@ -180,6 +213,18 @@ on boot. Add `--no-dashboard` to a run to skip launching it.
 A `--repeats N` run appears as one selectable run (the mean of its N repetitions,
 with a 95% CI and an `N/N runs` label); the picker shows `×N` so a repeats=1 run is
 distinct from a repeats=5 one. See [bench/dashboard/README.md](bench/dashboard/README.md).
+
+**Scenario menu.** When results span more than one scenario a segmented control
+(All / Juice Shop / HTB) appears above the pickers and filters which runs you can
+select, so you can flip between environments instead of scrolling one mixed list.
+
+**Manual verification (HTB).** Self-reported runs carry a red **self-reported**
+badge. Once you've submitted those flags to the platform and confirmed they're
+legitimate, click **Mark verified** on the run's card — the badge turns green
+(**verified (manual)**) and the confirmation (with a timestamp) is persisted to
+the run's `manifest.json`. This is recorded separately from the scenario's own
+`verified` flag, so a manual confirmation never masquerades as automated
+target-side truth; click **Unverify** to undo it.
 
 ## License
 
