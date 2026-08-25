@@ -44,6 +44,10 @@
   .badges{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
   .chip{background:var(--chip);border-radius:999px;padding:3px 9px;font-size:12px;color:var(--muted)}
   .chip.mode{font-weight:600;color:var(--ink)}
+  .chip.unverified{color:var(--bad);border:1px solid var(--bad);font-weight:600}
+  .chip.verified{color:var(--good);border:1px solid var(--good);font-weight:600}
+  .chip.machine{color:var(--ink);font-weight:600}
+  .del.verify:hover{border-color:var(--good);color:var(--good)}
   .prov{font-size:12px;color:var(--muted);margin:-6px 0 14px;font-variant-numeric:tabular-nums}
   .prov code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
   .dirty{color:var(--b)}
@@ -96,6 +100,11 @@
     <h1>pt-bench · compare</h1>
     <p>Pick two runs to compare coverage, efficiency, and where the solves came from.</p>
   </header>
+
+  <div class="toolbar" id="scenarioBar" hidden>
+    <span class="tb-k">Scenario</span>
+    <div class="seg" id="scenarioSeg" role="group" aria-label="Filter by scenario"></div>
+  </div>
 
   <div class="pickers">
     <div class="pick a"><label>Run A</label><select id="selA"></select></div>
@@ -159,21 +168,59 @@ let DENOM = "time";
 async function jget(u){ const r = await fetch(u); if(!r.ok) throw new Error(u); return r.json(); }
 
 let RUNS = [];
+let SCENARIO = "";   // "" = all scenarios; otherwise a scenario id filter
+
 function optionLabel(r){
   const d = (r.started_at||"").replace("T"," ").slice(0,16);
-  return `${r.arm} · ${r.scenario} · ${r.mode} · ×${r.repeats} · ${d}  (${pct(r.coverage_mean)})`;
+  const box = r.machine_name ? ` · ${r.machine_name}` : "";
+  return `${r.arm} · ${r.scenario}${box} · ${r.mode} · ×${r.repeats} · ${d}  (${pct(r.coverage_mean)})`;
+}
+
+function filteredRuns(){
+  return SCENARIO ? RUNS.filter(r => r.scenario === SCENARIO) : RUNS;
 }
 
 function buildOptions(){
   return `<option value="">— select a run —</option>` +
-    RUNS.map(r=>`<option value="${r.id}">${optionLabel(r)}</option>`).join("");
+    filteredRuns().map(r=>`<option value="${r.id}">${optionLabel(r)}</option>`).join("");
+}
+
+// A segmented control over the scenarios actually present, plus "All". Hidden
+// when everything is one scenario (nothing to switch between).
+const SCENARIO_LABELS = {"juice-shop":"Juice Shop", "htb":"HTB"};
+function buildScenarioSeg(){
+  const ids = [...new Set(RUNS.map(r=>r.scenario).filter(Boolean))].sort();
+  const bar = $("#scenarioBar");
+  if(ids.length < 2){ bar.hidden = true; return; }
+  bar.hidden = false;
+  const btn = (val,txt,pressed) =>
+    `<button type="button" data-s="${val}" aria-pressed="${pressed}">${txt}</button>`;
+  $("#scenarioSeg").innerHTML =
+    btn("", "All", SCENARIO==="") +
+    ids.map(id => btn(id, SCENARIO_LABELS[id]||id, SCENARIO===id)).join("");
+  for(const b of $("#scenarioSeg").querySelectorAll("button")){
+    b.onclick = () => { SCENARIO = b.dataset.s; onScenarioChange(); };
+  }
+}
+
+function onScenarioChange(){
+  for(const b of $("#scenarioSeg").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String(b.dataset.s === SCENARIO));
+  const opts = buildOptions();
+  const fr = filteredRuns();
+  $("#selA").innerHTML = $("#selB").innerHTML = opts;
+  $("#selA").value = fr[0] ? fr[0].id : "";
+  $("#selB").value = fr[1] ? fr[1].id : "";
+  refresh();
 }
 
 async function boot(){
   RUNS = await jget("/api/runs");
+  buildScenarioSeg();
+  const fr = filteredRuns();
   $("#selA").innerHTML = $("#selB").innerHTML = buildOptions();
-  if(RUNS[0]) $("#selA").value = RUNS[0].id;
-  if(RUNS[1]) $("#selB").value = RUNS[1].id;
+  if(fr[0]) $("#selA").value = fr[0].id;
+  if(fr[1]) $("#selB").value = fr[1].id;
   $("#selA").onchange = refresh; $("#selB").onchange = refresh;
   for(const btn of document.querySelectorAll("#denom button")){
     btn.onclick = () => { DENOM = btn.dataset.d; renderCards(); };
@@ -183,11 +230,13 @@ async function boot(){
 
 async function reloadRuns(){
   RUNS = await jget("/api/runs");
+  buildScenarioSeg();
   const opts = buildOptions();
+  const fr = filteredRuns();
   for(const sel of [$("#selA"),$("#selB")]){
     const cur = sel.value;
     sel.innerHTML = opts;
-    sel.value = RUNS.some(r=>r.id===cur) ? cur : "";  // keep selection if it survives
+    sel.value = fr.some(r=>r.id===cur) ? cur : "";  // keep selection if it survives
   }
 }
 
@@ -195,6 +244,17 @@ window.deleteRun = async (id) => {
   if(!confirm(`Delete this run permanently?\n\n${id}\n\nThis removes it from disk and cannot be undone.`)) return;
   const r = await fetch("/api/runs/" + id, {method:"DELETE"});
   if(!r.ok){ alert("Delete failed (HTTP " + r.status + ")"); return; }
+  await reloadRuns();
+  await refresh();
+};
+
+// Manually mark/unmark a self-reported run as human-verified (flags submitted and
+// confirmed). Persists to the run's manifest via the backend.
+window.toggleVerified = async (id, next) => {
+  const r = await fetch("/api/runs/" + id + "/verify", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({verified: next})});
+  if(!r.ok){ alert("Update failed (HTTP " + r.status + ")"); return; }
   await reloadRuns();
   await refresh();
 };
@@ -349,6 +409,11 @@ function stopChips(detail){
 
 function renderCard(detail, color){
   const m = detail.manifest||{}, rows = detail.rows||[];
+  const sc = m.scenario_config||{};
+  // Source-unverified runs (e.g. HTB, graded from the agent's self-report) can be
+  // manually confirmed in the UI once you've submitted the flags yourself.
+  const selfReported = m.verified === false;
+  const manualOk = !!((m.manual_verification||{}).verified);
   // Prefer the canonical summary.json; fall back to row-derived metrics for any
   // field it lacks, so a missing/stale summary can't blank the card.
   const s = Object.assign(rowMetrics(rows), detail.summary||{});
@@ -365,12 +430,17 @@ function renderCard(detail, color){
   return `<div class="card">
     <div class="card-head">
       <h2>${m.arm||"?"}</h2>
+      ${selfReported?`<button class="del verify" title="${manualOk?"remove your manual confirmation":"you submitted these flags to the platform and confirmed they're legitimate"}" onclick="toggleVerified('${detail.id}', ${!manualOk})">${manualOk?"Unverify":"Mark verified"}</button>`:""}
       <button class="del" onclick="deleteRun('${detail.id}')">Delete</button>
     </div>
     <div class="badges">
       <span class="chip mode">${m.mode||""}</span>
       <span class="chip">${m.scenario||""}</span>
+      ${sc.machine_name?`<span class="chip machine" title="target machine">${sc.machine_name}${sc.difficulty!=null?` · diff ${sc.difficulty}`:""}</span>`:""}
       ${m.model?`<span class="chip">${m.model}</span>`:""}
+      ${selfReported ? (manualOk
+        ? `<span class="chip verified" title="manually confirmed: you submitted these flags and verified them${(m.manual_verification||{}).at?` (${(m.manual_verification).at})`:""}">verified (manual)</span>`
+        : `<span class="chip unverified" title="coverage is the agent's self-reported flags (flags.json), not target-verified truth">self-reported</span>`) : ""}
       <span class="chip" title="runs with a gradable result (completed, or stopped by a budget/refusal) / total repetitions">${(s.n_graded ?? s.n_completed)??0}/${s.n_runs??0} runs</span>
     </div>
     ${prov}

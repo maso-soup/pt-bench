@@ -12,6 +12,7 @@ _FACTORIES: dict[str, Callable[[dict], Scenario]] = {}
 # id -> module path providing `register()`. New scenarios add one line here.
 _KNOWN_MODULES = {
     "juice-shop": "bench.scenarios.juice_shop.scenario",
+    "htb": "bench.scenarios.htb.scenario",
 }
 
 

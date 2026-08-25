@@ -33,6 +33,11 @@ working directory is arbitrary; all paths it needs are inside the spec.
 ```
 
 - `target_url` / `scope` — what the agent is told about the target.
+- `objective` (optional) — scenario-supplied task text. When present the adapter
+  should use it as the agent's task instead of its own default prompt; it may
+  contain the literal `{output_dir}`, which the adapter substitutes with
+  `workdir` so the agent knows where to write deliverables. The HTB scenario uses
+  this to ask the agent to record captured flags in `flags.json` (below).
 - `model` — model id the adapter should run the agent on (adapter-specific meaning).
 - `budget` — resource caps for the run. `wall_time_s`, `usd`, and `tokens` are
   hard limits: the adapter MUST stop the agent when any is reached and report
@@ -54,6 +59,7 @@ working directory is arbitrary; all paths it needs are inside the spec.
 | `usage.json` | recommended | token / cost / time totals |
 | `tool_calls.jsonl` | recommended | one JSON object per tool invocation |
 | `transcript.jsonl` | optional | raw agent transcript, for debugging |
+| `flags.json` | scenario-specific | flags the agent captured, e.g. `{"user": "...", "root": "..."}` — written by the AGENT (not the adapter) into `workdir` when the scenario's `objective` asks for it. Trust-based scenarios (HTB) grade from this. |
 
 ### `status.json`
 ```json

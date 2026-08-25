@@ -39,10 +39,15 @@ class TargetHandle:
     target_url: str
     scope: str
     meta: dict[str, Any] = field(default_factory=dict)  # scenario-private
+    objective: str | None = None  # optional task text the adapter renders into
+                                  # the agent's prompt; None => adapter default
 
     def public(self) -> dict[str, Any]:
         """The subset an agent is allowed to see (goes into the run spec)."""
-        return {"target_url": self.target_url, "scope": self.scope}
+        out = {"target_url": self.target_url, "scope": self.scope}
+        if self.objective is not None:
+            out["objective"] = self.objective
+        return out
 
 
 @dataclass
@@ -74,6 +79,13 @@ class Scenario(abc.ABC):
     # Opt in when the oracle is cheap and safe to poll repeatedly during a run;
     # the runner then reports solves live (see bench/core/progress.py).
     supports_live_progress: bool = False
+
+    # True when the oracle reads target-side truth (e.g. Juice Shop's server-
+    # tracked solved-state). Set False for scenarios that TRUST the agent's own
+    # self-report (e.g. the HTB scenario, which grades the flags the agent claims
+    # to have found). The runner records this in the manifest so unverified
+    # results are never mistaken for verified ones.
+    verified: bool = True
 
     @abc.abstractmethod
     def provision(self) -> TargetHandle:

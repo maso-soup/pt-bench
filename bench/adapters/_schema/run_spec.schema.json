@@ -6,6 +6,10 @@
   "properties": {
     "target_url": { "type": "string" },
     "scope": { "type": "string" },
+    "objective": { "type": ["string", "null"],
+      "description": "optional scenario-supplied task text; replaces the adapter's default prompt when present. May contain {output_dir}, substituted with workdir." },
+    "continuation": { "type": "boolean",
+      "description": "max-coverage mode: the agent is resuming a target it already worked, not starting fresh." },
     "model": { "type": ["string", "null"] },
     "budget": {
       "type": "object",

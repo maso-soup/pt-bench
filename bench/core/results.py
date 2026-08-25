@@ -50,14 +50,22 @@ def git_sha(path: str | Path | None) -> dict[str, Any] | None:
 
 def make_manifest(*, arm: dict[str, Any], scenario: str, mode: str, repeats: int,
                   started_at: str, budget: dict[str, Any] | None,
-                  pt_bench_dir: str | Path, agent_repo: str | None) -> dict[str, Any]:
-    """Run-batch provenance: what was run, how, and from which code versions."""
+                  pt_bench_dir: str | Path, agent_repo: str | None,
+                  scenario_config: dict[str, Any] | None = None,
+                  verified: bool = True) -> dict[str, Any]:
+    """Run-batch provenance: what was run, how, and from which code versions.
+
+    `scenario_config` records the per-run scenario inputs (e.g. the HTB machine
+    name / difficulty / target); `verified` is False when coverage came from the
+    agent's self-report rather than target-side truth."""
     return {
         "schema_version": SCHEMA_VERSION,
         "arm": arm.get("name"),
         "adapter": arm.get("adapter"),
         "model": arm.get("model"),
         "scenario": scenario,
+        "scenario_config": dict(scenario_config or {}),
+        "verified": verified,
         "mode": mode,
         "repeats": repeats,
         "started_at": started_at,

@@ -249,30 +249,40 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
 
 def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
              mode: str, results_dir: Path, progress_enabled: bool,
-             progress_interval: float | None) -> tuple[list[dict], Path]:
+             progress_interval: float | None,
+             scenario_config: dict | None = None) -> tuple[list[dict], Path]:
     budget = Budget.from_dict(arm.get("budget"))
     cmd = adapter_cmd(arm["adapter"])
     started_at = dt.datetime.now()
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
+    # CLI-supplied scenario config (e.g. the HTB machine) overrides the arm's.
+    merged_cfg = {**(arm.get("scenario_config") or {}), **(scenario_config or {})}
+    # A probe instance just reads scenario-level facts for the manifest (whether
+    # coverage is target-verified); each repetition still gets its own instance.
+    verified = registry.get_scenario(scenario_id, merged_cfg).verified
     # One batch dir per cell groups its repetitions and holds provenance.
     batch_dir = results_dir / arm["name"] / scenario_id / stamp
     results.write_json(results.make_manifest(
         arm=arm, scenario=scenario_id, mode=mode, repeats=repeats,
         started_at=started_at.isoformat(timespec="seconds"), budget=budget.to_dict(),
         pt_bench_dir=resources.package_root(),
-        agent_repo=(arm.get("adapter_config") or {}).get("repo")),
+        agent_repo=(arm.get("adapter_config") or {}).get("repo"),
+        scenario_config=merged_cfg, verified=verified),
         batch_dir / "manifest.json")
     rows: list[dict] = []
 
     for i in range(repeats):
         workdir = batch_dir / f"r{i}"
         print(f"\n=== {arm['name']} x {scenario_id} [{mode}] : repeat {i} ===")
-        scenario = registry.get_scenario(scenario_id, arm.get("scenario_config"))
+        scenario = registry.get_scenario(scenario_id, merged_cfg)
 
         handle = None
         try:
             print("  provisioning target ...")
             handle = scenario.provision()
+            # Some scenarios (e.g. HTB) read the agent's self-reported artifacts
+            # from this repetition's output dir; hand them the path.
+            handle.meta["run_workdir"] = str(workdir)
             gt = scenario.ground_truth(handle)
             print(f"  target up: {handle.target_url}  ({len(gt)} challenges)")
 
@@ -339,12 +349,43 @@ def run_cell(arm: dict, scenario_id: str, repeats: int, keep_up: bool, *,
     return rows, batch_dir
 
 
+def _scenario_config_from_args(args) -> dict:
+    """Collect per-run scenario config from the CLI: the convenience flags plus
+    any --scenario-config KEY=VALUE pairs. Later sources win on key collisions."""
+    cfg: dict = {}
+    if args.target is not None:
+        cfg["target"] = args.target
+    if args.machine_name is not None:
+        cfg["machine_name"] = args.machine_name
+    if args.difficulty is not None:
+        cfg["difficulty"] = args.difficulty
+    for item in args.scenario_config or []:
+        if "=" not in item:
+            raise SystemExit(f"--scenario-config expects KEY=VALUE, got: {item!r}")
+        k, v = item.split("=", 1)
+        cfg[k.strip()] = v.strip()
+    return cfg
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="pt-bench", description="Run one pt-bench cell.")
     ap.add_argument("--arm", help="arm to run (omit only when using --dashboard alone)")
     ap.add_argument("--scenario",
                     help="scenario to run (omit only when using --dashboard alone)")
     ap.add_argument("--repeats", type=int, default=1)
+    # Per-run scenario inputs. The three convenience flags are for the htb
+    # scenario (a manually-supplied box); --scenario-config is the generic
+    # escape hatch for any scenario. All merge into the scenario config and
+    # override the arm's own scenario_config.
+    ap.add_argument("--target", default=None,
+                    help="target host/IP for scenarios that take one (htb)")
+    ap.add_argument("--machine-name", default=None,
+                    help="machine name for the htb scenario (labels results)")
+    ap.add_argument("--difficulty", type=int, default=None,
+                    help="difficulty rating for the htb scenario (weights flags)")
+    ap.add_argument("--scenario-config", action="append", default=[],
+                    metavar="KEY=VALUE",
+                    help="extra scenario config, repeatable (e.g. reachability_port=22)")
     ap.add_argument("--mode", choices=MODES, default="autonomous",
                     help="autonomous: one run, agent stops when it decides (honest "
                          "baseline). max-coverage: re-invoke to resume until it "
@@ -387,11 +428,14 @@ def main() -> None:
     if not args.no_dashboard:
         dashboard_url = ensure_dashboard(results_dir, args.dashboard_port)
 
+    scenario_config = _scenario_config_from_args(args)
+
     arm = load_arm(args.arm, args.arms_dir)
     rows, batch_dir = run_cell(arm, args.scenario, args.repeats, args.keep_up,
                                mode=args.mode, results_dir=results_dir,
                                progress_enabled=progress_enabled,
-                               progress_interval=args.progress_interval)
+                               progress_interval=args.progress_interval,
+                               scenario_config=scenario_config)
 
     print("\n=== aggregate ===")
     for k, v in results.aggregate(rows).items():

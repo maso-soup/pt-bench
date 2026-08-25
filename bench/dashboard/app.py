@@ -12,11 +12,12 @@ resolves it (shared bench.core.results.resolve_results_dir).
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import shutil
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, send_from_directory
+from flask import Flask, abort, jsonify, request, send_from_directory
 
 from bench.core import results as results_mod
 
@@ -51,6 +52,7 @@ def api_runs():
         d = mf.parent
         m = _read(mf) or {}
         s = _read(d / "summary.json") or {}
+        sc = m.get("scenario_config") or {}
         items.append({
             "id": d.relative_to(RESULTS_DIR).as_posix(),
             "arm": m.get("arm"), "scenario": m.get("scenario"),
@@ -58,6 +60,12 @@ def api_runs():
             "started_at": m.get("started_at"), "repeats": m.get("repeats"),
             "coverage_mean": s.get("coverage_mean"),
             "coverage_weighted_mean": s.get("coverage_weighted_mean"),
+            # Scenario-specific facts the UI groups/labels by. `verified` defaults
+            # True for older runs written before the field existed.
+            "verified": m.get("verified", True),
+            "manual_verified": bool((m.get("manual_verification") or {}).get("verified")),
+            "machine_name": sc.get("machine_name"),
+            "difficulty": sc.get("difficulty"),
         })
     items.sort(key=lambda x: x.get("started_at") or "", reverse=True)
     return jsonify(items)
@@ -73,6 +81,28 @@ def api_run(rid: str):
         "summary": _read(d / "summary.json"),
         "rows": [r for r in rows if r],
     })
+
+
+@app.post("/api/runs/<path:rid>/verify")
+def api_verify_run(rid: str):
+    """Manually mark (or unmark) a run as human-verified — i.e. you submitted the
+    self-reported flags to the platform and confirmed they're legitimate. This is
+    recorded separately from the scenario's own `verified` flag (which reflects
+    whether coverage came from target-side truth), so provenance stays honest:
+    a manual confirmation never masquerades as automated target verification."""
+    d = _safe_batch_dir(rid)
+    verified = bool((request.get_json(silent=True) or {}).get("verified"))
+    mf = d / "manifest.json"
+    m = _read(mf) or {}
+    if verified:
+        m["manual_verification"] = {
+            "verified": True,
+            "at": dt.datetime.now().isoformat(timespec="seconds"),
+        }
+    else:
+        m.pop("manual_verification", None)
+    mf.write_text(json.dumps(m, indent=2, sort_keys=True))
+    return jsonify({"ok": True, "manual_verified": verified})
 
 
 @app.delete("/api/runs/<path:rid>")
