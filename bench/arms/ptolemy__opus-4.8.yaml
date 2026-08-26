@@ -1,0 +1,32 @@
+# The ptolemy skill/playbook stack on Opus 4.8.
+# adapter=claude-code points the generic Claude Code adapter at the ptolemy repo;
+# ptolemy itself is untouched and unaware of the benchmark.
+#
+# For unattended headless runs the adapter needs permission prompts suppressed.
+# That is an opt-in you enable yourself by adding to adapter_config:
+#     skip_permissions: true
+# See adapters/claude-code/README.md before enabling it.
+name: ptolemy__opus-4.8
+adapter: claude-code
+model: claude-opus-4-8
+adapter_config:
+  # drop it at ~/ptolemy (the default). Absolute paths also work.
+  repo: ~/ptolemy
+  skip_permissions: true
+  # Before each repetition, move prior state to trash so a later run can't read
+  # it and skip ahead. Whole dirs are moved. ~/.claude/projects holds Claude
+  # Code's per-project memory (keyed by cwd), which the agent reads back on a
+  # fresh run — clearing it stops memory leaking between repetitions. NOTE:
+  # ~/.claude/projects covers ALL Claude Code projects/sessions on this host, so
+  # run the benchmark on a dedicated host and not alongside other claude sessions.
+  reset_paths:
+    - ~/ptolemy-state
+    - ~/.claude/projects
+budget:
+  # All three caps are hard: the claude-code adapter stops the run when any is hit
+  # (tokens/USD from the streamed usage, wall time in-loop), and the runner enforces
+  # wall time as a subprocess backstop and totals every cap across max-coverage
+  # continuation iterations.
+  usd: 15                      # enforced: stops when cumulative cost exceeds this
+  tokens: 10000000             # enforced: stops when total (input+output) tokens exceed this
+  wall_time_s: 1800            # enforced: adapter in-loop + runner backstop
