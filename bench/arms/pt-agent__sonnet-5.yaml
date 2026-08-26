@@ -1,4 +1,4 @@
-# The pt-agent skill/playbook stack on Opus 4.8.
+# The pt-agent skill/playbook stack on Sonnet 5.
 # adapter=claude-code points the generic Claude Code adapter at the pt-agent repo;
 # pt-agent itself is untouched and unaware of the benchmark.
 #
@@ -6,7 +6,7 @@
 # That is an opt-in you enable yourself by adding to adapter_config:
 #     skip_permissions: true
 # See adapters/claude-code/README.md before enabling it.
-name: pt-agent__opus-4.8
+name: pt-agent__sonnet-5
 adapter: claude-code
 model: claude-sonnet-5
 adapter_config:
