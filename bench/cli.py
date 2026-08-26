@@ -150,9 +150,13 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
            mode: str) -> tuple[dict, list[Path], dict]:
     """Run the adapter once (autonomous) or in a continuation loop (max-coverage)
     until the agent solves everything, plateaus (an iteration adds no new solves),
-    errors, or the total wall budget runs out. State is preserved across
-    iterations so the agent resumes; the harness reads the oracle to decide when
-    to stop while the agent itself stays blind to the score."""
+    errors, hits a budget limit, or reaches the iteration cap. State is preserved
+    across iterations so the agent resumes; the harness reads the oracle to decide
+    when to stop while the agent itself stays blind to the score.
+
+    A safety refusal is terminal in autonomous mode but NOT in max-coverage: there
+    a refused iteration is followed by a fresh continuation attempt, so one guarded
+    turn can't end a coverage run."""
     total_wall = budget.wall_time_s
     started = time.time()
     max_iters = MAX_CONTINUATION_ITERS if mode == "max-coverage" else 1
@@ -221,13 +225,25 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
             stop = _classify_stop(status)
             hit_max = False
             break
-        # max-coverage: the adapter erroring, hitting a hard limit, or being
-        # refused by safety ends the cell — continuing would just re-hit it.
-        if status.get("status") in ("error", "budget_exceeded", "refused"):
+        # max-coverage: a hard error or a budget/limit stop ends the cell —
+        # continuing would just re-hit it.
+        if status.get("status") in ("error", "budget_exceeded"):
             stop = _classify_stop(status)
             hit_max = False
             break
         solved = len(scenario.oracle(handle).solved)
+        # A safety refusal does NOT end a max-coverage cell: give the agent a
+        # fresh continuation iteration to make progress a different way instead of
+        # letting one refused turn terminate the whole run. (Autonomous mode still
+        # treats a refusal as terminal — the `mode != max-coverage` branch breaks
+        # first, before reaching here.) A
+        # refusal makes no new solves, so it must not advance prev_solved or count
+        # as a plateau; the shared budget and the MAX_CONTINUATION_ITERS cap bound
+        # how long a persistently-refusing agent can keep retrying.
+        if status.get("status") == "refused":
+            print(f"  iter {it} ended on a safety refusal "
+                  f"({solved}/{len(gt)} solved) — continuing to the next iteration")
+            continue
         print(f"  progress after iter {it}: {solved}/{len(gt)} solved")
         if solved >= len(gt):
             stop = {"code": "all_solved", "detail": f"solved all {len(gt)} findings"}
