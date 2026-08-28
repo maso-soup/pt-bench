@@ -7,7 +7,10 @@ and lets you compare **different agent designs** (hold the model fixed) or
 
 The flagship scenario — a re-branded **OWASP Juice Shop** run black-box — grades
 three dimensions: **coverage**, **exploitation** (both from the target's own
-solved state), and **efficiency** (tool calls, tokens, cost, time). A second,
+solved state), and **efficiency** (tool calls, tokens, cost, time). **SPRKL** is a
+second target-verified web scenario with the same shape but no public
+solutions, so it measures novel discovery rather than recall (see
+[SPRKL scenario](#sprkl-scenario-target-verified-uncontaminated) below). A third,
 trust-based **HTB** scenario runs an agent against a boot2root machine you supply
 (see [HTB scenario](#htb-scenario-black-box-self-reported) below). Safety/scope
 and report-quality scoring are deliberately out of scope for now.
@@ -38,7 +41,7 @@ an agent never changes core code.
 
 ```
 bench/core/            scenario contract, grader, results, resources, adapter invocation
-bench/scenarios/       one dir per environment (juice_shop/, htb/)
+bench/scenarios/       one dir per environment (juice_shop/, sprkl/, htb/)
 bench/adapters/        PROTOCOL.md, JSON schemas, one dir per agent wrapper
   example-python/      minimal no-op reference adapter (validates the harness)
   claude-code/         drives any Claude Code repo (e.g. pt-agent) headless
@@ -137,6 +140,43 @@ pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --re
 pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
 ```
 
+## SPRKL scenario (target-verified, uncontaminated)
+
+The `sprkl` scenario runs an agent against [SPRKL](https://github.com/maso-soup/sprkl),
+a homegrown vulnerable storefront with **95 live findings** across 11 families at
+difficulty 1–6. It grades exactly like Juice Shop — first-party, server-side
+solved-state, `verified: true` — but SPRKL is not a famous training app, so none
+of its solutions exist in a model's training data. Juice Shop measures how well an
+agent reproduces published walkthroughs; SPRKL measures whether it can find things
+nobody has written up. Run both and the gap between them is the interesting number.
+
+```bash
+pt-bench --arm pt-agent__opus-4.8 --scenario sprkl --repeats 5
+```
+
+It needs none of Juice Shop's machinery. There is no re-branding overlay (no brand
+to launder) and no nginx front door (no shared port to filter): SPRKL serves its
+answer key from a separate app on a separate port behind an `X-Oracle-Key` header,
+and that API is read-only — a finding is recorded only when a vulnerable code path
+actually fires, so there is nothing for an agent to self-report into. The scenario
+publishes the storefront where the agent can reach it and the oracle to loopback on
+a random per-run port it is never told.
+
+Three integrity checks run at provision time, each aborting rather than producing a
+quietly meaningless result:
+
+- the oracle's paths must not be reachable through the agent-facing URL,
+- the oracle must reject an unkeyed read (expects 401),
+- the **image must not carry its own answer key**. SPRKL has live path-traversal,
+  file-inclusion and RCE findings, so a cheat sheet or full `findings.yaml` at
+  `/app` would turn one solve into a walkthrough for the other 94. Images before
+  `v1.0.2` shipped exactly that; pin `v1.0.2` or later.
+
+Knobs live in `bench/scenarios/sprkl/config.yaml` — `image` (pin an exact tag),
+`port`, `ready_timeout_s`, and `category_field`, which selects whether the grader
+groups by `family` (11 coarse buckets, the default) or `category` (~40
+fine-grained). Override any of them per run with `--scenario-config KEY=VALUE`.
+
 ## HTB scenario (black-box, self-reported)
 
 The `htb` scenario runs an agent against a boot2root machine **you** stand up and
@@ -178,8 +218,9 @@ pt-bench --arm pt-agent__opus-4.8 --scenario htb \
 
 ## v1 caveats
 
-- Juice Shop is white-box and well-documented, so v1 measures agentic execution,
-  not novel discovery. Add a less-documented scenario to separate the two.
+- Juice Shop is white-box and well-documented, so on that scenario alone the
+  benchmark measures agentic execution, not novel discovery. The `sprkl` scenario
+  exists to separate the two — compare an arm's coverage across both.
 - `tool_calls` / `usd` budgets are advisory in v1; only `wall_time_s` is enforced.
 - Concurrent runs on one host need distinct `port`s (compose project names are
   already unique per run).

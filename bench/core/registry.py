@@ -13,6 +13,7 @@ _FACTORIES: dict[str, Callable[[dict], Scenario]] = {}
 _KNOWN_MODULES = {
     "juice-shop": "bench.scenarios.juice_shop.scenario",
     "htb": "bench.scenarios.htb.scenario",
+    "sprkl": "bench.scenarios.sprkl.scenario",
 }
 
 

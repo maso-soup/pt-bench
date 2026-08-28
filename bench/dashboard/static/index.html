@@ -187,7 +187,7 @@ function buildOptions(){
 
 // A segmented control over the scenarios actually present, plus "All". Hidden
 // when everything is one scenario (nothing to switch between).
-const SCENARIO_LABELS = {"juice-shop":"Juice Shop", "htb":"HTB"};
+const SCENARIO_LABELS = {"juice-shop":"Juice Shop", "htb":"HTB", "sprkl":"SPRKL"};
 function buildScenarioSeg(){
   const ids = [...new Set(RUNS.map(r=>r.scenario).filter(Boolean))].sort();
   const bar = $("#scenarioBar");

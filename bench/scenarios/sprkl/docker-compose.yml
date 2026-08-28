@@ -1,0 +1,28 @@
+# SPRKL target for the benchmark. The runner sets SPRKL_IMAGE, PUBLIC_PORT,
+# ORACLE_PORT, SPRKL_ORACLE_KEY and a unique COMPOSE_PROJECT_NAME per run so
+# concurrent cells and repetitions never share state.
+#
+# Unlike the Juice Shop scenario there is no nginx front door here: SPRKL already
+# serves its answer key from a SEPARATE app on a SEPARATE port, gated by
+# X-Oracle-Key. So hiding it is just a matter of where that port is published.
+services:
+  sprkl:
+    image: ${SPRKL_IMAGE:-ghcr.io/maso-soup/sprkl:v1.0.2}
+    environment:
+      # Random per run. The agent is never told it, and cannot reach the port it
+      # opens from outside the container anyway.
+      - SPRKL_ORACLE_KEY=${SPRKL_ORACLE_KEY:-changeme-benchmark-key}
+    ports:
+      # Agent-facing: the storefront, and nothing else.
+      - "${PUBLIC_PORT:-8080}:8080"
+      # Oracle-facing: the scoring API, bound to loopback on a per-run random port
+      # the agent is never told. The harness reads solved-state through this.
+      - "127.0.0.1:${ORACLE_PORT:-9090}:9090"
+    volumes:
+      # The solves DB lives here. Named (so it is project-scoped) and removed by
+      # `down -v` at teardown, so no solved-state leaks into the next repetition.
+      - sprkl-data:/data
+    restart: "no"
+
+volumes:
+  sprkl-data:
