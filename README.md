@@ -172,6 +172,19 @@ quietly meaningless result:
   `/app` would turn one solve into a walkthrough for the other 94. Images before
   `v1.0.2` shipped exactly that; pin `v1.0.2` or later.
 
+**Contamination guard.** SPRKL's repo is public, and its `findings.yaml` carries
+every finding's location and hint — so an agent with web access can look up the
+answers instead of finding them. After each iteration the runner scans the agent's
+tool calls (name, arguments and results, so a `WebFetch` url, a `git clone` inside
+a Bash command, and an echoed search result all count) for the scenario's declared
+markers. A hit ends the run immediately with stop code **`contamination`**, in both
+modes — unlike a safety refusal this cannot be recovered from by continuing, since
+every later iteration is tainted too. Coverage is still graded and written; the
+stop code is what marks the run unusable as a discovery measurement, and the
+dashboard badges it. Scenarios declare their own markers via
+`contamination_markers` on `Scenario` (empty for juice-shop and htb, which have
+nothing fetchable to guard).
+
 Knobs live in `bench/scenarios/sprkl/config.yaml` — `image` (pin an exact tag),
 `port`, `ready_timeout_s`, and `category_field`, which selects whether the grader
 groups by `family` (11 coarse buckets, the default) or `category` (~40

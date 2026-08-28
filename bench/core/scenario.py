@@ -80,6 +80,13 @@ class Scenario(abc.ABC):
     # the runner then reports solves live (see bench/core/progress.py).
     supports_live_progress: bool = False
 
+    # Substrings that must not appear in the agent's tool calls: a scenario whose
+    # solutions are published somewhere declares where, and the runner ends the run
+    # with stop code "contamination" if the agent fetches it. A run where the agent
+    # read the answer key measures retrieval, not discovery, so it has to be
+    # distinguishable from one where it did the work. Empty = nothing to guard.
+    contamination_markers: tuple[str, ...] = ()
+
     # True when the oracle reads target-side truth (e.g. Juice Shop's server-
     # tracked solved-state). Set False for scenarios that TRUST the agent's own
     # self-report (e.g. the HTB scenario, which grades the flags the agent claims

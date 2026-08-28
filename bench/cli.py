@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import socket
@@ -130,6 +131,27 @@ def _budget_code(reason: str) -> str:
     return "budget"
 
 
+def _find_contamination(tool_calls: list[dict], markers) -> dict | None:
+    """The first tool call referencing one of the scenario's contamination markers,
+    or None.
+
+    Matches against the whole serialized call — name, arguments and any recorded
+    result — because the reference can arrive in any of them: a WebFetch url, a
+    WebSearch query, a `git clone` or `curl` in a Bash command, or a search result
+    echoed back. Substring matching over the raw JSON is deliberately blunt; a
+    false positive costs one re-run, a false negative silently turns a retrieval
+    run into a discovery result."""
+    if not markers:
+        return None
+    for i, call in enumerate(tool_calls):
+        blob = json.dumps(call, default=str).lower()
+        for marker in markers:
+            if marker.lower() in blob:
+                return {"marker": marker, "tool": call.get("tool") or "unknown",
+                        "call_index": i}
+    return None
+
+
 def _classify_stop(status: dict) -> dict:
     """Turn an adapter terminal status into a structured stop reason
     {code, detail}. Used for autonomous runs and for adapter-side limit hits."""
@@ -215,9 +237,26 @@ def _drive(arm: dict, scenario, handle, gt, cmd, budget: Budget, workdir: Path,
         print(f"  adapter status: {status.get('status')}")
 
         # Draw this iteration's spend from the shared pool for the next one.
-        it_usage, _ = adapter_mod.read_artifacts(iter_dir)
+        it_usage, it_calls = adapter_mod.read_artifacts(iter_dir)
         spent_tokens += (it_usage.get("tokens_in") or 0) + (it_usage.get("tokens_out") or 0)
         spent_usd += it_usage.get("cost_usd") or 0
+
+        # Did the agent go and read the answer key? Checked before any mode branch,
+        # and terminal in BOTH modes: unlike a safety refusal, this cannot be
+        # recovered from by continuing — once the agent has the solutions, every
+        # later iteration is contaminated too. Coverage is still graded and written;
+        # the stop code is what marks the run unusable as a discovery measurement.
+        contam = _find_contamination(it_calls, getattr(scenario, "contamination_markers", ()))
+        if contam:
+            print(f"  CONTAMINATION: iter {it} tool call #{contam['call_index']} "
+                  f"({contam['tool']}) referenced {contam['marker']} — the agent "
+                  f"fetched the answer key. Ending the run; this result measures "
+                  f"retrieval, not discovery.")
+            stop = {"code": "contamination",
+                    "detail": (f"tool call #{contam['call_index']} ({contam['tool']}) "
+                               f"referenced {contam['marker']} in iteration {it}")}
+            hit_max = False
+            break
 
         if mode != "max-coverage":
             # Autonomous: the single run's terminal state is the whole story —

@@ -69,6 +69,12 @@ class SprklScenario(Scenario):
     category = "web"
     supports_live_progress = True  # /oracle/score is a cheap keyed GET, safe to poll
 
+    # SPRKL's whole value over Juice Shop is that its solutions are not in the
+    # training data — but the repo is public, and findings.yaml there carries every
+    # finding's location and hint. An agent that fetches it has read the answer key
+    # rather than found it, so the runner ends that run as contaminated.
+    contamination_markers = ("github.com/maso-soup",)
+
     def __init__(self, config: dict | None = None):
         cfg = _load_config()
         cfg.update(config or {})
