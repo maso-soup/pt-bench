@@ -1,28 +1,52 @@
-# SPRKL target for the benchmark. The runner sets SPRKL_IMAGE, PUBLIC_PORT,
+# SPRKL target for the benchmark — now TWO images (the scenario changed with
+# SPRKL v2.0.0). The runner sets SPRKL_APP_IMAGE, SPRKL_SCORER_IMAGE, PUBLIC_PORT,
 # ORACLE_PORT, SPRKL_ORACLE_KEY and a unique COMPOSE_PROJECT_NAME per run so
 # concurrent cells and repetitions never share state.
 #
-# Unlike the Juice Shop scenario there is no nginx front door here: SPRKL already
-# serves its answer key from a SEPARATE app on a SEPARATE port, gated by
-# X-Oracle-Key. So hiding it is just a matter of where that port is published.
+#   agent ──▶ scorer:8080 (ingress proxy) ──▶ app:8081
+#             scorer also owns the score API (9090), the rules and the catalog.
+#
+# The agent only ever gets the storefront URL (PUBLIC_PORT -> scorer:8080). The
+# score API is published to loopback on a per-run random port the agent is never
+# told. The app is on an INTERNAL network with no route to the agent or the
+# internet, and carries no answer key — so even RCE in the app cannot read the
+# rules/catalog/key (those live in the scorer) nor score itself.
 services:
-  sprkl:
-    image: ${SPRKL_IMAGE:-ghcr.io/maso-soup/sprkl:v1.0.2}
+  scorer:
+    image: ${SPRKL_SCORER_IMAGE:-ghcr.io/maso-soup/sprkl-scorer:v2.0.0}
     environment:
-      # Random per run. The agent is never told it, and cannot reach the port it
-      # opens from outside the container anyway.
+      # Random per run. The agent is never told it; the score API rejects any
+      # request without it (401).
       - SPRKL_ORACLE_KEY=${SPRKL_ORACLE_KEY:-changeme-benchmark-key}
+    networks: [edge, internal]
     ports:
-      # Agent-facing: the storefront, and nothing else.
+      # Agent-facing: the ingress proxy (which forwards to the app), nothing else.
       - "${PUBLIC_PORT:-8080}:8080"
-      # Oracle-facing: the scoring API, bound to loopback on a per-run random port
-      # the agent is never told. The harness reads solved-state through this.
+      # Harness-facing: the scoring API, bound to loopback on a per-run random port.
       - "127.0.0.1:${ORACLE_PORT:-9090}:9090"
     volumes:
-      # The solves DB lives here. Named (so it is project-scoped) and removed by
-      # `down -v` at teardown, so no solved-state leaks into the next repetition.
-      - sprkl-data:/data
+      # One-way tap socket + the per-run seed spec, shared with the app. Project-
+      # scoped and removed by `down -v`, so no state leaks into the next run.
+      - sprkl-run:/run/sprkl
+      # Transcripts, blobs and the solve store the harness reads through 9090.
+      - sprkl-runs:/runs
     restart: "no"
 
+  app:
+    image: ${SPRKL_APP_IMAGE:-ghcr.io/maso-soup/sprkl-app:v2.0.0}
+    networks: [internal]          # internal only: no route to the agent or the internet
+    volumes:
+      - sprkl-run:/run/sprkl
+      - sprkl-data:/data
+    depends_on: [scorer]
+    restart: "no"
+
+networks:
+  edge:                           # scorer <-> agent + host-published ports
+  internal:
+    internal: true                # the boundary: the app has NO route off this network
+
 volumes:
+  sprkl-run:
   sprkl-data:
+  sprkl-runs:

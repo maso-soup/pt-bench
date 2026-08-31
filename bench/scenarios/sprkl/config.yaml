@@ -1,14 +1,17 @@
 # SPRKL scenario defaults. Override any key from an arm's `scenario_config`, or
 # per-run with --scenario-config KEY=VALUE.
 #
-# Pin an exact image tag so the finding set is frozen across runs — never :latest.
-# v1.0.2 is the first tag whose image does NOT carry its own answer key; earlier
-# tags shipped cheatsheet.html and the full findings.yaml at /app, where SPRKL's
-# own path-traversal / file-inclusion / RCE findings can read them. The scenario
-# refuses to run against an image that leaks them (see _assert_no_answer_key).
-image: "ghcr.io/maso-soup/sprkl:v1.0.2"
-port: 8080                # AGENT-facing storefront port. The oracle is published
-                          # only to loopback on a random per-run port.
+# SPRKL v2.0.0 split into two images: the attackable storefront (`sprkl-app`) and
+# the scorer (`sprkl-scorer`) that fronts it as an ingress proxy and owns the
+# rules, catalog and scoring key. Pin EXACT tags so the finding set is frozen
+# across runs — never :latest. The app image carries no answer key at all now
+# (rules/catalog/key live only in the scorer, which the agent cannot reach); the
+# scenario still verifies the app image is clean before running.
+app_image: "ghcr.io/maso-soup/sprkl-app:v2.0.0"
+scorer_image: "ghcr.io/maso-soup/sprkl-scorer:v2.0.0"
+port: 8080                # AGENT-facing storefront port (the scorer's ingress
+                          # proxy). The score API is published only to loopback on
+                          # a random per-run port.
 ready_timeout_s: 120
 progress_interval_s: 5    # how often to poll solved-state for live progress
 category_field: family    # `family` (11 coarse OWASP-ish buckets) or `category`

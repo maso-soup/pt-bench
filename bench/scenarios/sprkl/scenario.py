@@ -6,19 +6,20 @@ it is not a famous training app, so nothing about it can be recalled from a
 model's training data. Juice Shop measures how well an agent reproduces published
 solutions; SPRKL measures novel discovery. Running both separates the two.
 
-It also needs far less machinery than Juice Shop. There is no re-branding overlay
-(no brand to launder) and no nginx front door (no shared port to filter): SPRKL
-already serves its answer key from a SEPARATE Flask app on a SEPARATE port, gated
-by an X-Oracle-Key header, and that app is read-only — there is no client-reachable
-"mark solved" endpoint, so a finding is recorded only when a vulnerable code path
-actually fires. All this scenario has to do is publish the storefront where the
-agent can reach it and the oracle where it cannot: loopback, on a random per-run
-port the agent is never told.
+As of SPRKL v2.0.0 it ships as TWO images: the attackable storefront
+(`sprkl-app`) and the `sprkl-scorer` that fronts it as an ingress proxy and owns
+the rules, findings catalog, scoring key and solve store. The agent talks to the
+scorer's proxy on 8080 (which forwards to the app); the score API on 9090 is
+read-only, key-gated, and published only to loopback on a random per-run port the
+agent is never told. There is no client-reachable "mark solved" endpoint — a
+finding is recorded only when a vulnerable code path actually fires and the
+scorer's rule agrees.
 
-The one thing worth guarding is the image itself. SPRKL has live path-traversal,
-file-inclusion and RCE findings, so an image that carries its own cheat sheet or
-full findings.yaml at /app turns one solve into a walkthrough for the other 94.
-Images before v1.0.2 did exactly that, so provision() checks and refuses to run.
+The split is itself the anti-contamination guard the image used to need overlays
+for: the attackable container carries no cheat sheet, no findings.yaml, no rules
+and no key, so SPRKL's live path-traversal / file-inclusion / RCE findings read
+buggy source, not an answer key. provision() still verifies the app image is
+clean and that the score API is hidden and gated before running.
 """
 from __future__ import annotations
 
@@ -58,10 +59,12 @@ FAMILY_LABELS = {
     "12-api-protocol": "API Protocol",
 }
 
-# Files that must not exist inside the running container: each one is an answer
-# key or a walkthrough that SPRKL's own file-read findings could reach.
+# Files that must not exist inside the attackable APP container: each is an answer
+# key or walkthrough that SPRKL's own file-read findings could reach. The rules,
+# catalog and key live in the SEPARATE scorer container, which the agent cannot
+# shell into, so this check targets the app service only.
 _ANSWER_KEY_FILES = ("cheatsheet.html", "CHEATSHEET.md", "findings.yaml",
-                     "tools", "tests")
+                     "scorer", "tools", "tests")
 
 
 class SprklScenario(Scenario):
@@ -70,16 +73,18 @@ class SprklScenario(Scenario):
     supports_live_progress = True  # /oracle/score is a cheap keyed GET, safe to poll
 
     # SPRKL's whole value over Juice Shop is that its solutions are not in the
-    # training data — but the repo is public, and findings.yaml there carries every
-    # finding's location and hint. An agent that fetches it has read the answer key
-    # rather than found it, so the runner ends that run as contaminated.
+    # training data — but the repo is public, and findings.yaml + scorer/rules.py
+    # there carry every finding's location and detection logic. An agent that
+    # fetches them has read the answer key rather than found it, so the runner
+    # ends that run as contaminated.
     contamination_markers = ("github.com/maso-soup",)
 
     def __init__(self, config: dict | None = None):
         cfg = _load_config()
         cfg.update(config or {})
         self.public_port = int(cfg.get("port", 8080))
-        self.image = cfg["image"]
+        self.app_image = cfg["app_image"]
+        self.scorer_image = cfg["scorer_image"]
         self.oracle_key = cfg.get("oracle_key") or secrets.token_hex(16)
         self.ready_timeout_s = int(cfg.get("ready_timeout_s", 120))
         self.progress_interval_s = float(cfg.get("progress_interval_s", 5))
@@ -89,9 +94,9 @@ class SprklScenario(Scenario):
     # -- lifecycle -----------------------------------------------------------
     def provision(self) -> TargetHandle:
         oracle_port = _free_port()
-        env = _compose_env(image=self.image, public_port=self.public_port,
-                           oracle_port=oracle_port, oracle_key=self.oracle_key,
-                           project=self.project)
+        env = _compose_env(app_image=self.app_image, scorer_image=self.scorer_image,
+                           public_port=self.public_port, oracle_port=oracle_port,
+                           oracle_key=self.oracle_key, project=self.project)
         proc = subprocess.run(
             ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d"],
             env=env, check=False, capture_output=True, text=True,
@@ -117,7 +122,7 @@ class SprklScenario(Scenario):
 
     def ground_truth(self, handle: TargetHandle) -> list[ItemSpec]:
         # Only `live` findings are gradable. SPRKL also catalogues a handful of
-        # documented-N/A ones (exploit types impractical in a Python single-image
+        # documented-N/A ones (exploit types impractical in a Python
         # build); counting those would cap coverage below 1.0 forever.
         return [
             ItemSpec(key=f["id"], category=self._category_of(f),
@@ -137,7 +142,8 @@ class SprklScenario(Scenario):
         )
 
     def teardown(self, handle: TargetHandle) -> None:
-        env = _compose_env(image=self.image, public_port=self.public_port,
+        env = _compose_env(app_image=self.app_image, scorer_image=self.scorer_image,
+                           public_port=self.public_port,
                            oracle_port=0,  # unused on teardown
                            oracle_key=self.oracle_key,
                            project=handle.meta.get("project", self.project))
@@ -157,8 +163,9 @@ class SprklScenario(Scenario):
         return raw.get("findings", []) if isinstance(raw, dict) else []
 
     def _wait_ready(self, agent_url: str, oracle_url: str) -> None:
-        """Wait for both apps. They boot in one container but as two servers, and
-        the oracle's catalog load is lazy, so poll each."""
+        """Wait for both halves. They are two containers now (scorer proxy + app),
+        the scorer must generate the run before the app can serve, and the catalog
+        load is lazy — so poll the storefront and the score API independently."""
         deadline = time.time() + self.ready_timeout_s
         last = ""
         while time.time() < deadline:
@@ -206,37 +213,38 @@ class SprklScenario(Scenario):
                 f"bench/scenarios/sprkl/docker-compose.yml.")
 
     def _assert_no_answer_key(self, env: dict) -> None:
-        """Refuse to run against an image that carries its own answer key.
+        """Refuse to run if the ATTACKABLE app image carries an answer key.
 
-        SPRKL images before v1.0.2 shipped cheatsheet.html, CHEATSHEET.md and the
-        full findings.yaml (with each finding's location and hint) at /app. Since
-        SPRKL has live path-traversal, file-inclusion and RCE findings, a single
-        file read there hands the agent a walkthrough for everything else — the
-        run would look like a strong result and mean nothing. Pin v1.0.2+.
+        The agent reaches the app through the scorer's proxy and could get RCE in
+        it, so the app container must hold no cheat sheet, no findings.yaml, no
+        rules and no key. Under the v2 split it does not — the app image builds
+        from an allowlist (app/, shared/, serve.py) and the rules/catalog/key live
+        only in the scorer, which the agent cannot shell into. This verifies that
+        invariant against the running app container rather than trusting it.
 
         Only a positive finding aborts: if `exec` itself fails (container still
         settling, docker exec unavailable) we warn and continue rather than
         blocking a run on a check that could not be performed."""
         probe = "; ".join(f'[ -e /app/{f} ] && echo {f}' for f in _ANSWER_KEY_FILES)
         proc = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "exec", "-T", "sprkl",
+            ["docker", "compose", "-f", str(COMPOSE_FILE), "exec", "-T", "app",
              "sh", "-c", f"{probe}; true"],
             env=env, check=False, capture_output=True, text=True,
         )
         if proc.returncode != 0:
-            print(f"  warning: could not verify the image carries no answer key "
+            print(f"  warning: could not verify the app image carries no answer key "
                   f"({(proc.stderr or '').strip()[:200]}); continuing")
             return
         found = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
         if found:
             raise RuntimeError(
-                f"SECURITY: the SPRKL image {self.image} carries its own answer key "
-                f"at /app: {', '.join(found)}.\n"
+                f"SECURITY: the SPRKL app image {self.app_image} carries an answer "
+                f"key at /app: {', '.join(found)}.\n"
                 f"SPRKL has live path-traversal, file-inclusion and RCE findings, so "
                 f"one file read would leak the solutions to the rest and the run "
                 f"would be meaningless. Refusing to run.\n"
-                f"Pin image: ghcr.io/maso-soup/sprkl:v1.0.2 (or later) in "
-                f"bench/scenarios/sprkl/config.yaml.")
+                f"Pin a clean app image (ghcr.io/maso-soup/sprkl-app:v2.0.0 or later) "
+                f"in bench/scenarios/sprkl/config.yaml.")
 
 
 def _oracle_url(handle: TargetHandle) -> str:
@@ -311,11 +319,12 @@ def _compose_up_error(proc: subprocess.CompletedProcess) -> str:
     return f"docker compose up failed (exit {proc.returncode}).\n\n{detail}\n\n{hint}"
 
 
-def _compose_env(*, image: str, public_port: int, oracle_port: int,
-                 oracle_key: str, project: str) -> dict:
+def _compose_env(*, app_image: str, scorer_image: str, public_port: int,
+                 oracle_port: int, oracle_key: str, project: str) -> dict:
     env = dict(os.environ)
     env.update({
-        "SPRKL_IMAGE": image,
+        "SPRKL_APP_IMAGE": app_image,
+        "SPRKL_SCORER_IMAGE": scorer_image,
         "PUBLIC_PORT": str(public_port),
         "ORACLE_PORT": str(oracle_port),
         "SPRKL_ORACLE_KEY": oracle_key,

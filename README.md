@@ -154,27 +154,32 @@ nobody has written up. Run both and the gap between them is the interesting numb
 pt-bench --arm pt-agent__opus-4.8 --scenario sprkl --repeats 5
 ```
 
-It needs none of Juice Shop's machinery. There is no re-branding overlay (no brand
-to launder) and no nginx front door (no shared port to filter): SPRKL serves its
-answer key from a separate app on a separate port behind an `X-Oracle-Key` header,
-and that API is read-only — a finding is recorded only when a vulnerable code path
-actually fires, so there is nothing for an agent to self-report into. The scenario
-publishes the storefront where the agent can reach it and the oracle to loopback on
-a random per-run port it is never told.
+It needs none of Juice Shop's re-branding machinery. As of **SPRKL v2.0.0** the
+target ships as two images: the attackable storefront (`sprkl-app`) and a
+`sprkl-scorer` that fronts it as an ingress proxy and owns the rules, catalog,
+scoring key and solve store. The agent talks to the scorer's proxy (which forwards
+to the app); the score API is read-only, `X-Oracle-Key`-gated, and published to
+loopback on a random per-run port it is never told. A finding is recorded only when
+a vulnerable code path fires and the scorer's rule agrees — there is nothing to
+self-report into. The split is also the contamination guard the image used to need
+overlays for: the attackable container carries no cheat sheet, no `findings.yaml`,
+no rules and no key.
 
 Three integrity checks run at provision time, each aborting rather than producing a
 quietly meaningless result:
 
 - the oracle's paths must not be reachable through the agent-facing URL,
 - the oracle must reject an unkeyed read (expects 401),
-- the **image must not carry its own answer key**. SPRKL has live path-traversal,
-  file-inclusion and RCE findings, so a cheat sheet or full `findings.yaml` at
-  `/app` would turn one solve into a walkthrough for the other 94. Images before
-  `v1.0.2` shipped exactly that; pin `v1.0.2` or later.
+- the **app image must not carry an answer key**. SPRKL has live path-traversal,
+  file-inclusion and RCE findings, so a cheat sheet, `findings.yaml`, or the
+  `scorer/` rules at `/app` would turn one solve into a walkthrough for the other
+  94. Under the v2 split the app image carries none of these (they live only in the
+  scorer, which the agent cannot reach); the check verifies that against the running
+  app container.
 
-**Contamination guard.** SPRKL's repo is public, and its `findings.yaml` carries
-every finding's location and hint — so an agent with web access can look up the
-answers instead of finding them. After each iteration the runner scans the agent's
+**Contamination guard.** SPRKL's repo is public, and its `findings.yaml` +
+`scorer/rules.py` carry every finding's location and detection logic — so an agent
+with web access can look up the answers instead of finding them. After each iteration the runner scans the agent's
 tool calls (name, arguments and results, so a `WebFetch` url, a `git clone` inside
 a Bash command, and an echoed search result all count) for the scenario's declared
 markers. A hit ends the run immediately with stop code **`contamination`**, in both
@@ -185,8 +190,9 @@ dashboard badges it. Scenarios declare their own markers via
 `contamination_markers` on `Scenario` (empty for juice-shop and htb, which have
 nothing fetchable to guard).
 
-Knobs live in `bench/scenarios/sprkl/config.yaml` — `image` (pin an exact tag),
-`port`, `ready_timeout_s`, and `category_field`, which selects whether the grader
+Knobs live in `bench/scenarios/sprkl/config.yaml` — `app_image` and `scorer_image`
+(pin exact tags), `port`, `ready_timeout_s`, and `category_field`, which selects
+whether the grader
 groups by `family` (11 coarse buckets, the default) or `category` (~40
 fine-grained). Override any of them per run with `--scenario-config KEY=VALUE`.
 

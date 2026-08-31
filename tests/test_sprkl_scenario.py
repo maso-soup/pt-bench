@@ -69,11 +69,24 @@ def test_oracle_port_is_loopback_only():
     assert '"${ORACLE_PORT' not in compose, "oracle port published without a bind address"
 
 
-def test_pinned_image_is_not_latest(scenario):
-    """A floating tag would let the finding set drift between runs, and :latest
-    once carried the answer key inside the image."""
-    assert scenario.image.startswith("ghcr.io/maso-soup/sprkl:v")
-    assert not scenario.image.endswith(":latest")
+def test_pinned_images_are_not_latest(scenario):
+    """Both images must be pinned to an exact tag — a floating tag would let the
+    finding set drift between runs."""
+    assert scenario.app_image.startswith("ghcr.io/maso-soup/sprkl-app:v")
+    assert scenario.scorer_image.startswith("ghcr.io/maso-soup/sprkl-scorer:v")
+    assert not scenario.app_image.endswith(":latest")
+    assert not scenario.scorer_image.endswith(":latest")
+
+
+def test_app_container_is_internal_only(scenario):
+    """The attackable app must be on the internal network only — no host port, no
+    egress. Only the scorer (proxy + score API) is published."""
+    compose = (sp.COMPOSE_FILE).read_text()
+    import yaml as _y
+    c = _y.safe_load(compose)
+    assert "ports" not in c["services"]["app"], "app must publish no host ports"
+    assert c["services"]["app"]["networks"] == ["internal"]
+    assert c["networks"]["internal"].get("internal") is True
 
 
 # -- ground truth ------------------------------------------------------------
