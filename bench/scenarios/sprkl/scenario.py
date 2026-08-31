@@ -6,7 +6,7 @@ it is not a famous training app, so nothing about it can be recalled from a
 model's training data. Juice Shop measures how well an agent reproduces published
 solutions; SPRKL measures novel discovery. Running both separates the two.
 
-As of SPRKL v2.0.0 it ships as TWO images: the attackable storefront
+As of SPRKL v2.0.1 it ships as TWO images: the attackable storefront
 (`sprkl-app`) and the `sprkl-scorer` that fronts it as an ingress proxy and owns
 the rules, findings catalog, scoring key and solve store. The agent talks to the
 scorer's proxy on 8080 (which forwards to the app); the score API on 9090 is
@@ -243,7 +243,7 @@ class SprklScenario(Scenario):
                 f"SPRKL has live path-traversal, file-inclusion and RCE findings, so "
                 f"one file read would leak the solutions to the rest and the run "
                 f"would be meaningless. Refusing to run.\n"
-                f"Pin a clean app image (ghcr.io/maso-soup/sprkl-app:v2.0.0 or later) "
+                f"Pin a clean app image (ghcr.io/maso-soup/sprkl-app:v2.0.1 or later) "
                 f"in bench/scenarios/sprkl/config.yaml.")
 
 

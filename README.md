@@ -154,7 +154,7 @@ nobody has written up. Run both and the gap between them is the interesting numb
 pt-bench --arm pt-agent__opus-4.8 --scenario sprkl --repeats 5
 ```
 
-It needs none of Juice Shop's re-branding machinery. As of **SPRKL v2.0.0** the
+It needs none of Juice Shop's re-branding machinery. As of **SPRKL v2.0.1** the
 target ships as two images: the attackable storefront (`sprkl-app`) and a
 `sprkl-scorer` that fronts it as an ingress proxy and owns the rules, catalog,
 scoring key and solve store. The agent talks to the scorer's proxy (which forwards

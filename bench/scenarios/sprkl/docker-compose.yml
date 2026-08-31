@@ -1,5 +1,5 @@
 # SPRKL target for the benchmark — now TWO images (the scenario changed with
-# SPRKL v2.0.0). The runner sets SPRKL_APP_IMAGE, SPRKL_SCORER_IMAGE, PUBLIC_PORT,
+# SPRKL v2.0.1). The runner sets SPRKL_APP_IMAGE, SPRKL_SCORER_IMAGE, PUBLIC_PORT,
 # ORACLE_PORT, SPRKL_ORACLE_KEY and a unique COMPOSE_PROJECT_NAME per run so
 # concurrent cells and repetitions never share state.
 #
