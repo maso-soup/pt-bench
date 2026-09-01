@@ -1,22 +1,18 @@
-# pt-bench
+# PT Bench
 
-A modular benchmark for **agentic penetration-testing agents**. It measures how
+A modular benchmark harness for **agentic penetration-testing agents**. It measures how
 well an autonomous security agent does against a deliberately-vulnerable target,
-and lets you compare **different agent designs** (hold the model fixed) or
-**different models** (hold the design fixed).
+and lets you compare **different agent designs** or
+**different models**.
 
-The flagship scenario — a re-branded **OWASP Juice Shop** run black-box — grades
-three dimensions: **coverage**, **exploitation** (both from the target's own
-solved state), and **efficiency** (tool calls, tokens, cost, time). **SPRKL** is a
-second target-verified web scenario with the same shape but no public
-solutions, so it measures novel discovery rather than recall (see
-[SPRKL scenario](#sprkl-scenario-target-verified-uncontaminated) below). A third,
-trust-based **HTB** scenario runs an agent against a boot2root machine you supply
-(see [HTB scenario](#htb-scenario-black-box-self-reported) below). Safety/scope
-and report-quality scoring are deliberately out of scope for now.
+Currently supports 3 scenarios: 
 
-The design is modular so more environments (AD ranges, cloud accounts, forensics
-images, …) drop in later without touching the runner.
+1) **SPRKL**, a custom, scratch built web scenario with 95 unique vulnerabilites covering 
+OWASP and CWE families for web and API vulnerabilities. (see [SPRKL scenario](#sprkl-scenario-target-verified-uncontaminated) below). 
+2) **OWASP Juice Shop**, the well-known vulnerable web application by OWASP
+3) **HTB**, runs an agent against a machine IP you supply (see [HTB scenario](#htb-scenario-black-box-self-reported) below). 
+
+The design is modular so more environments can drop in later without touching the runner.
 
 ## Two boundaries that keep it modular
 
@@ -24,7 +20,7 @@ images, …) drop in later without touching the runner.
             ┌─────────────┐   run_spec.json    ┌───────────────┐
    scenario │   RUNNER    │ ─────────────────▶ │    ADAPTER    │ ─▶ agent-under-test
  (target) ◀─┤ (agnostic)  │ ◀───────────────── │ (per agent)   │
-   oracle   └─────────────┘   artifacts (files) └───────────────┘
+   oracle   └─────────────┘     artifacts      └───────────────┘
 ```
 
 - **Scenario boundary** (`bench/core/scenario.py`): every target implements
@@ -55,40 +51,29 @@ run.py                 back-compat shim for `python run.py ...`
 
 ## Setup
 
-Run these once, top to bottom. (Kali/Debian shown; on macOS install Docker Desktop
-and skip the `apt` line.)
-
 ```bash
 # 1. System packages (one time)
 sudo apt update && sudo apt install -y docker.io python3-venv python3-full
 sudo systemctl enable --now docker
 
-# 2. Install pt-bench inside a virtualenv  (use the venv — do NOT run `sudo pip`)
-git clone <url> pt-bench
+# 2. Install pt-bench inside a virtualenv
+git clone https://github.com/maso-soup/pt-bench.git
 cd pt-bench
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# 3. Check it works (free — just downloads the target container)
+# 3. Check it works
 pt-bench --arm example__noop --scenario juice-shop --repeats 1
-```
-
-**In every new terminal**, activate the venv first, then use `pt-bench`:
-
-```bash
-cd pt-bench && source .venv/bin/activate
 ```
 
 ## Running benchmarks
 
 ```bash
-# pt-agent needs the `claude` CLI installed + logged in, and PT_AGENT_REPO pointing
-# at your pt-agent checkout (or just put it at ~/pt-agent).
-export PT_AGENT_REPO=/path/to/pt-agent
+# Agent needs the `claude` (or equivalent) CLI installed + logged in, and agent directory specified in the arm YAML
 
-pt-bench --arm pt-agent__opus-4.8    --scenario juice-shop --repeats 5   # the agent
-pt-bench --arm flat-prompt__opus-4.8 --scenario juice-shop --repeats 5   # baseline control
+pt-bench --arm pt-agent__opus-4.8    --scenario sprkl
+pt-bench --arm flat-prompt__opus-4.8 --scenario sprkl
 ```
 
 **Portable `repo` paths.** An arm's `adapter_config.repo` may be absolute, relative
@@ -96,8 +81,8 @@ a materialized baseline dir (`baselines/<name>`, used by the flat-prompt control
 or use `~` and `${VAR:-default}` expansion (e.g. `${PT_AGENT_REPO:-~/pt-agent}`).
 The runner resolves it at load time, so the shipped arms work unchanged on any host.
 
-Each run provisions a fresh Juice Shop container, drives the agent, reads the
-solved-challenge state, grades, and tears the container down.
+Each run provisions a fresh container, drives the agent, reads the
+solved-challenge state, grades, and tears the container down, except for HTB. 
 
 **Results storage.** Results are kept **outside the repo** so they survive
 re-clones: `--results-dir` > `$PTBENCH_RESULTS_DIR` > the XDG default
@@ -109,11 +94,7 @@ mode, model, budget, and the git SHA of pt-bench and the agent repo),
 
 **Live progress.** During a run the harness polls the scenario's oracle and prints
 each challenge as it's solved, plus an in-place running counter — so you can watch
-a long engagement instead of staring at `running adapter ...`. It's on by default
-when stdout is a TTY; control it with `--progress / --no-progress` and
-`--progress-interval <seconds>`. Every run also writes a solved-over-time curve to
-`progress.jsonl` in its workdir. Only scenarios that set
-`supports_live_progress = True` are polled.
+a long engagement instead of staring at `running adapter ...`. 
 
 **Modes (`--mode`).** Agents tend to wrap up an open-ended pentest and stop long
 before they've exhausted a target, so a single number conflates *capability* with
@@ -135,12 +116,11 @@ land in `workdir/iter-NN/`; efficiency (tokens/cost/tool-calls) is summed across
 iterations.
 
 ```bash
-# baseline vs ceiling for the same arm
-pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode autonomous   --repeats 5
-pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --mode max-coverage --repeats 5
+pt-bench --arm pt-agent__opus-4.8 --scenario sprkl --mode autonomous
+pt-bench --arm pt-agent__opus-4.8 --scenario sprkl --mode max-coverage
 ```
 
-## SPRKL scenario (target-verified, uncontaminated)
+## SPRKL scenario
 
 The `sprkl` scenario runs an agent against [SPRKL](https://github.com/maso-soup/sprkl),
 a homegrown vulnerable storefront with **95 live findings** across 11 families at
@@ -148,13 +128,13 @@ difficulty 1–6. It grades exactly like Juice Shop — first-party, server-side
 solved-state, `verified: true` — but SPRKL is not a famous training app, so none
 of its solutions exist in a model's training data. Juice Shop measures how well an
 agent reproduces published walkthroughs; SPRKL measures whether it can find things
-nobody has written up. Run both and the gap between them is the interesting number.
+nobody has written up. 
 
 ```bash
-pt-bench --arm pt-agent__opus-4.8 --scenario sprkl --repeats 5
+pt-bench --arm pt-agent__opus-4.8 --scenario sprkl
 ```
 
-It needs none of Juice Shop's re-branding machinery. As of **SPRKL v2.0.1** the
+As of **SPRKL v2.0.2** the
 target ships as two images: the attackable storefront (`sprkl-app`) and a
 `sprkl-scorer` that fronts it as an ingress proxy and owns the rules, catalog,
 scoring key and solve store. The agent talks to the scorer's proxy (which forwards
@@ -235,15 +215,6 @@ pt-bench --arm pt-agent__opus-4.8 --scenario htb \
 - **A new target** → new dir under `bench/scenarios/` implementing `Scenario`,
   and one line in `bench/core/registry.py`.
 
-## v1 caveats
-
-- Juice Shop is white-box and well-documented, so on that scenario alone the
-  benchmark measures agentic execution, not novel discovery. The `sprkl` scenario
-  exists to separate the two — compare an arm's coverage across both.
-- `tool_calls` / `usd` budgets are advisory in v1; only `wall_time_s` is enforced.
-- Concurrent runs on one host need distinct `port`s (compose project names are
-  already unique per run).
-
 ## Dashboard
 
 A local web UI to compare any two runs side by side (coverage, coverage-at-budget
@@ -251,28 +222,13 @@ curves, efficiency, by-category / by-difficulty, and git-SHA provenance). It shi
 with the benchmark — no extra install — and reads the same results dir.
 
 **It auto-starts with every run** (detached, on http://127.0.0.1:8008) and stays up
-afterward, so results are always viewable — you don't have to do anything:
-
-```bash
-pt-bench --arm pt-agent__opus-4.8 --scenario juice-shop --repeats 5
-# ...run finishes... dashboard is still up at http://127.0.0.1:8008
-```
+afterward, so results are always viewable.
 
 You can also start it on its own, without running a benchmark:
 
 ```bash
-pt-bench --dashboard          # just start the dashboard, then exit
-pt-bench-dashboard            # same thing (dedicated command)
-# both take --port / --results-dir
+pt-bench --dashboard
 ```
-
-It's idempotent (one dashboard per `--dashboard-port`, default 8008) and stays up
-until you reboot or stop it (`pkill -f bench.dashboard.app`); it does not auto-start
-on boot. Add `--no-dashboard` to a run to skip launching it.
-
-A `--repeats N` run appears as one selectable run (the mean of its N repetitions,
-with a 95% CI and an `N/N runs` label); the picker shows `×N` so a repeats=1 run is
-distinct from a repeats=5 one. See [bench/dashboard/README.md](bench/dashboard/README.md).
 
 **Scenario menu.** When results span more than one scenario a segmented control
 (All / Juice Shop / HTB) appears above the pickers and filters which runs you can
